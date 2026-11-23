@@ -25,7 +25,8 @@ SCHEMA = {
                "pages": int, "lines": int, "width": int},
     "ant": {"llm": str, "model": str, "llama_server": str, "threads": int, "ctx": int, "llm_port": int,
             "persona": str, "temperature": float, "max_turns": int, "house": str, "report": str,
-            "harness_key_file": str, "token_file": str, "run_file": str, "ca_cert": str, "quiet": bool},
+            "harness_key_file": str, "token_file": str, "run_file": str, "ca_cert": str, "quiet": bool,
+            "idle_minutes": int},
 }
 # Settings with no built-in default that a service needs in its file, checked by `hm config edit`.
 REQUIRED = {"keeper": (), "viewer": (), "runner": (), "ant": ("model",)}

@@ -5,15 +5,17 @@
                                           settings to ~/hypermaze/config/<component>.toml if missing
                                           (never overwrites), write the systemd user unit(s)
   hm start|stop|restart|status|logs <component>
-  hm update                               git pull, then restart every installed service
+  hm update                               git pull, then restart the keeper and viewer services
   hm config                               print all settings files (key/token/secret-like values masked)
   hm config edit <component>              open in $EDITOR, then check it parses and has what it needs
 
 Options: --dry-run (print what would be done, change nothing), --home DIR (instead of ~/hypermaze,
 also $HM_HOME), --repo URL (also $HM_REPO).
 
-Units: hypermaze-keeper.service, hypermaze-viewer.service, and for the ant hypermaze-llm.service
-(llama-server) plus hypermaze-ant.service (plays the run named by run_file/token_file once).
+Units: hypermaze-keeper.service, hypermaze-viewer.service, and for the ant hypermaze-ant.service
+(plays the run named by run_file/token_file once) plus hypermaze-llm.service (llama-server). The llm
+unit is not started at boot: each ant run starts it, and it stops itself after idle_minutes (ant.toml,
+default 5, 0 = never) with no work. `hm update` restarts neither. All units run with UMask=0077.
 The runner (runner/house.py) is a terminal game driven by play_llm.py or the ant, so it gets settings
 but no unit. For services to start at boot without a login: sudo loginctl enable-linger $USER
 """
@@ -35,14 +37,20 @@ SECRETISH = re.compile(r"key|token|secret|passw", re.I)
 # a long run of hex, or of token characters with letters and digits, that is not part of a path
 LONG_SECRET = re.compile(r"(?<![/\w.-])(?=[\w-]*\d)(?=[\w-]*[A-Za-z])[\w-]{32,}(?![/\w.-])")
 
-# component -> [(unit name, description, module args, restart policy, needs)]
+# component -> [(unit name, description, module args, restart policy, wants, start at boot)]
 UNITS = {
-    "keeper": [("hypermaze-keeper", "hypermaze map keeper", ["-m", "arena", "serve"], "on-failure", None)],
-    "viewer": [("hypermaze-viewer", "hypermaze Colosseum viewer", ["-m", "arena.viewer"], "on-failure", None)],
+    "keeper": [("hypermaze-keeper", "hypermaze map keeper", ["-m", "arena", "serve"], "on-failure", None, True)],
+    "viewer": [("hypermaze-viewer", "hypermaze Colosseum viewer", ["-m", "arena.viewer"], "on-failure", None, True)],
     "runner": [],
-    "ant": [("hypermaze-llm", "hypermaze ant llama-server", ["-m", "ant.llm_server"], "on-failure", None),
-            ("hypermaze-ant", "hypermaze ant (one run)", ["-m", "ant.pi_runner"], "no", "hypermaze-llm")],
+    # llama-server is started by each ant run (Wants=) and stops itself after idle_minutes; never at boot
+    "ant": [("hypermaze-llm", "hypermaze ant llama-server (stops itself when idle)", ["-m", "ant.llm_server"],
+             "on-failure", None, False),
+            ("hypermaze-ant", "hypermaze ant (one run)", ["-m", "ant.pi_runner"], "no", "hypermaze-llm", False)],
 }
+# what `hm start <component>` starts (the rest follows through Wants=)
+STARTS = {"keeper": ["hypermaze-keeper"], "viewer": ["hypermaze-viewer"], "ant": ["hypermaze-ant"]}
+# never restarted by `hm update`: a run in progress, and the model (it restarts with the next run)
+NO_UPDATE_RESTART = {"hypermaze-ant", "hypermaze-llm"}
 
 
 class HM:
@@ -85,13 +93,13 @@ class HM:
     def installed(self, comp):
         return [u for u in self.units(comp) if os.path.exists(os.path.join(self.unitdir, u + ".service"))]
 
-    def unit_text(self, comp, name, desc, args, restart, needs):
+    def unit_text(self, comp, name, desc, args, restart, wants, boot):
         exec_args = [sys.executable, *args, "--config", self.cfg_path(comp)]
-        need = f"Requires={needs}.service\nAfter={needs}.service network-online.target\n" if needs \
+        need = f"Wants={wants}.service\nAfter={wants}.service network-online.target\n" if wants \
             else "After=network-online.target\n"
-        wanted = "" if restart == "no" else "\n[Install]\nWantedBy=default.target\n"
+        wanted = "\n[Install]\nWantedBy=default.target\n" if boot else ""
         return (f"[Unit]\nDescription={desc}\n{need}\n[Service]\nType=simple\n"
-                f"WorkingDirectory={self.app}\nEnvironment=PYTHONUNBUFFERED=1\n"
+                f"WorkingDirectory={self.app}\nEnvironment=PYTHONUNBUFFERED=1\nUMask=0077\n"
                 f"ExecStart={' '.join(shlex.quote(a) for a in exec_args)}\nRestart={restart}\n"
                 + ("RestartSec=5\n" if restart != "no" else "") + wanted)
 
@@ -113,11 +121,11 @@ class HM:
         if not UNITS[comp]:
             print(f"{comp}: settings only, no service (it is started by play_llm.py or the ant)")
             return 0
-        for name, desc, args, restart, needs in UNITS[comp]:
+        for name, desc, args, restart, wants, boot in UNITS[comp]:
             self.write(os.path.join(self.unitdir, name + ".service"),
-                       self.unit_text(comp, name, desc, args, restart, needs))
+                       self.unit_text(comp, name, desc, args, restart, wants, boot))
         self.run(["systemctl", "--user", "daemon-reload"])
-        enable = [u[0] for u in UNITS[comp] if u[3] != "no"]
+        enable = [u[0] for u in UNITS[comp] if u[5]]
         if enable:
             self.run(["systemctl", "--user", "enable", *enable])
         print(f"next: hm config edit {comp}   then   hm start {comp}")
@@ -136,14 +144,16 @@ class HM:
             return self.run(["systemctl", "--user", "status", "--no-pager", *units], check=False)
         if action == "stop":
             units = list(reversed(units))
+        elif action in ("start", "restart"):
+            units = STARTS[comp]
         return self.run(["systemctl", "--user", action, *units], check=False)
 
     def update(self):
         self.run(["git", "-C", self.app, "pull", "--ff-only"])
         for comp in COMPONENTS:
             for u in self.installed(comp):
-                if u == "hypermaze-ant":
-                    continue  # one run at a time: not restarted behind your back
+                if u in NO_UPDATE_RESTART:
+                    continue  # a run in progress, or the model: not restarted behind your back
                 self.run(["systemctl", "--user", "try-restart", u], check=False)
         return 0
 

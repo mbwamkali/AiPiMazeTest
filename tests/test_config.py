@@ -282,6 +282,94 @@ class TestAntSettings(unittest.TestCase):
             kp.close()
 
 
+FAKE_LLAMA = """#!/usr/bin/env python3
+# Stand-in for llama-server: answers /slots with the state in a file next to it ("busy" or "idle").
+import http.server, json, os, sys
+port = int(sys.argv[sys.argv.index("--port") + 1])
+state = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state")
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        busy = open(state).read().strip() == "busy" if os.path.exists(state) else False
+        body = json.dumps([{"id": 0, "is_processing": busy}]).encode()
+        self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers()
+        self.wfile.write(body)
+http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+"""
+
+
+class TestIdleDecision(unittest.TestCase):
+    """ant.llm_server's idle logic, with fake /slots answers and timestamps."""
+
+    def setUp(self):
+        from ant import llm_server
+        self.L = llm_server
+
+    def test_slots_busy(self):
+        L = self.L
+        self.assertTrue(L.slots_busy([{"id": 0, "is_processing": True}]))
+        self.assertFalse(L.slots_busy([{"id": 0, "is_processing": False}, {"id": 1, "is_processing": False}]))
+        self.assertTrue(L.slots_busy([{"id": 0, "state": 1}]))           # older llama.cpp
+        self.assertFalse(L.slots_busy([{"id": 0, "state": 0}]))
+        for bad in (None, [], {"error": "loading"}, [{"id": 0}], ["x"]):
+            self.assertIsNone(L.slots_busy(bad), bad)
+
+    def test_is_busy_unknown_counts_as_busy(self):
+        L = self.L
+        self.assertTrue(L.is_busy(True, False))
+        self.assertFalse(L.is_busy(False, True))     # /slots says idle: that wins
+        self.assertTrue(L.is_busy(None, True))       # loading, a run is on
+        self.assertFalse(L.is_busy(None, False))     # can't read /slots, no run
+        self.assertTrue(L.is_busy(None, None))       # can't tell at all: keep it
+
+    def test_should_stop(self):
+        L = self.L
+        t0 = 1000.0
+        self.assertFalse(L.should_stop(t0, t0 + 299, 5))
+        self.assertTrue(L.should_stop(t0, t0 + 300, 5))
+        self.assertTrue(L.should_stop(t0, t0 + 3600, 1))
+        self.assertFalse(L.should_stop(t0, t0 + 10 ** 6, 0))   # 0 = never
+
+    @unittest.skipUnless(HAVE_TOML, "settings files need Python 3.11+")
+    def test_supervisor_stops_idle_server_and_keeps_busy_one(self):
+        home = tempfile.mkdtemp()
+        fake = write(os.path.join(home, "llama-server"), FAKE_LLAMA.replace("/usr/bin/env python3", sys.executable, 1))
+        os.chmod(fake, 0o755)
+        port = free_port()
+        cfg = write(os.path.join(home, "ant.toml"), f'model = "{home}/m.gguf"\nllama_server = "{fake}"\n'
+                    f'llm_port = {port}\nidle_minutes = 5\n')
+        env = clean_env(home, PATH=os.path.join(home, "nobin"))  # no systemctl: unknown counts as busy
+        args = [sys.executable, "-m", "ant.llm_server", "--config", cfg, "--poll", "0.2", "--idle-seconds", "1.5"]
+
+        write(os.path.join(home, "state"), "busy")
+        p = subprocess.Popen(args, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            self.assertTrue(wait_port(port))
+            time.sleep(3)
+            self.assertIsNone(p.poll(), "a busy server must keep running")
+            write(os.path.join(home, "state"), "idle")
+            code = p.wait(timeout=15)
+            self.assertEqual(code, 0)                    # clean exit: Restart=on-failure leaves it down
+            self.assertIn("idle", p.stderr.read())
+            self.assertFalse(wait_port(port, timeout=1))  # llama-server went with it
+        finally:
+            if p.poll() is None:
+                stop(p)
+            else:
+                p.stdout.close(); p.stderr.close()
+
+    @unittest.skipUnless(HAVE_TOML, "settings files need Python 3.11+")
+    def test_dry_run_shows_idle_setting(self):
+        home = tempfile.mkdtemp()
+        cfg = write(os.path.join(home, "ant.toml"), 'model = "/m.gguf"\nidle_minutes = 0\n')
+        r = subprocess.run([sys.executable, "-m", "ant.llm_server", "--config", cfg, "--dry-run"], cwd=ROOT,
+                           env=clean_env(home), capture_output=True, text=True, timeout=30)
+        self.assertIn("idle stop: never", r.stdout)
+        r = subprocess.run([sys.executable, "-m", "ant.llm_server", "--config", cfg, "--dry-run", "--idle-minutes", "7"],
+                           cwd=ROOT, env=clean_env(home), capture_output=True, text=True, timeout=30)
+        self.assertIn("idle stop: after 7 min", r.stdout)
+
+
 @unittest.skipUnless(HAVE_TOML, "settings files need Python 3.11+")
 class TestHm(unittest.TestCase):
     def setUp(self):
@@ -324,6 +412,8 @@ class TestHm(unittest.TestCase):
         with open(unit) as f:
             text = f.read()
         self.assertIn(f"-m arena serve --config {cfg}", text)
+        self.assertIn("UMask=0077", text)
+        self.assertIn("WantedBy=default.target", text)
         self.assertIn(f"WorkingDirectory={os.path.join(self.home, 'hypermaze', 'app')}", text)
         r = self.hm("install", "runner")
         self.assertIn("settings only, no service", r.stdout)
@@ -336,6 +426,31 @@ class TestHm(unittest.TestCase):
         self.assertIn("systemctl --user try-restart hypermaze-keeper", calls)
         r = self.hm("config", "edit", "keeper")
         self.assertIn("OK:", r.stdout)
+
+    def test_ant_units_on_demand(self):
+        r = self.hm("--repo", ROOT, "install", "ant")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        d = os.path.join(self.home, ".config", "systemd", "user")
+        with open(os.path.join(d, "hypermaze-llm.service")) as f:
+            llm = f.read()
+        with open(os.path.join(d, "hypermaze-ant.service")) as f:
+            ant = f.read()
+        self.assertNotIn("[Install]", llm)                 # not started at boot
+        self.assertIn("Restart=on-failure", llm)           # a clean idle exit stays down
+        self.assertIn("Wants=hypermaze-llm.service", ant)
+        self.assertNotIn("Requires=", ant)
+        self.assertTrue(all("UMask=0077" in t for t in (llm, ant)))
+        with open(self.calls) as f:
+            calls = f.read()
+        self.assertNotIn("enable", calls)                  # nothing of the ant is enabled
+        self.hm("start", "ant")
+        self.hm("stop", "ant")
+        self.hm("update")
+        with open(self.calls) as f:
+            calls = f.read().splitlines()
+        self.assertIn("systemctl --user start hypermaze-ant", calls)
+        self.assertIn("systemctl --user stop hypermaze-ant hypermaze-llm", calls)
+        self.assertFalse([c for c in calls if "restart" in c and ("llm" in c or "hypermaze-ant" in c)])
 
     def test_config_masks_and_checks(self):
         d = os.path.join(self.home, "hypermaze", "config")

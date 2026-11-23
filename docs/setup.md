@@ -206,7 +206,7 @@ unit(s) to `~/.config/systemd/user/` with `--config` pointing at that file, and 
 |---|---|
 | keeper | `hypermaze-keeper.service` |
 | viewer | `hypermaze-viewer.service` |
-| ant | `hypermaze-llm.service` (llama-server, always on) and `hypermaze-ant.service` (one run, not restarted) |
+| ant | `hypermaze-ant.service` (one run, not restarted) and `hypermaze-llm.service` (llama-server, on demand) |
 | runner | none: `house.py` is a terminal game started by `play_llm.py` or the ant |
 
 ```bash
@@ -214,9 +214,19 @@ scripts/hm config edit ant        # $EDITOR, then checks the TOML parses and req
 scripts/hm config check ant       # the check alone
 scripts/hm config                 # every settings file, key/token/secret-like values masked
 scripts/hm start ant              # start | stop | restart | status | logs
-scripts/hm update                 # git pull, then try-restart keeper, viewer and llm services
+scripts/hm update                 # git pull, then try-restart the keeper and viewer services
 scripts/hm --dry-run install ant  # print what would happen, change nothing
 ```
+
+All units run with `UMask=0077`, so files they create (run logs, keys) are private to you.
+
+**The Pi's model runs on demand.** `hypermaze-llm.service` is not started at boot. Each ant run
+(`hm start ant`) starts it through `Wants=`, and the ant waits until the model has loaded.
+`ant.llm_server` checks llama-server's `/slots` every 30 s and stops it after `idle_minutes`
+(in `ant.toml`, default 5; 0 = never) with no request. It exits cleanly, so systemd leaves it down
+until the next run. A run started within those minutes reuses the warm model. While the model is
+loading, or if `/slots` can't be read, it counts as busy as long as `hypermaze-ant.service` is active.
+`hm update` restarts neither the ant nor the model.
 
 `--home DIR` (or `$HM_HOME`) uses another folder than `~/hypermaze`; `--repo URL` (or `$HM_REPO`)
 another repository. User services only run while you are logged in unless lingering is on:
