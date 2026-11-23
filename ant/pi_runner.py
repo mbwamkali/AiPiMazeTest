@@ -25,7 +25,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 from . import compact as C
 from . import personas as P
-from .lessons import room_screen
 
 
 def ask(llm, msgs, temperature, max_tokens=40):
@@ -101,7 +100,8 @@ def main(argv=None):
         sys.exit("no run token: set HOUSE_TOKEN or token_file in the settings")
     if cfg.get("ca_cert") and not os.environ.get("SSL_CERT_FILE"):
         os.environ["SSL_CERT_FILE"] = cfg["ca_cert"]
-    from house import Game, House
+    from house import House
+    from .notes import AntNotes
 
     report = None
     if a.report:
@@ -124,29 +124,46 @@ def main(argv=None):
 
     if not wait_for_llm(a.llm):
         sys.exit(f"no answer from the ant's llama-server at {a.llm}")
-    game = Game(House(a.house, token), notes=True)
-    screen = room_screen(game.intro())
-    last = None
+    house = House(a.house, token)
+    notes = AntNotes(house)      # the ant's only memory: its notebook, kept by the keeper
+    view = house.room()
+    notes.room(view["room"], view["doors"])
+    screen = notes.screen(view)
+    last, moves, result = None, 0, view.get("ended")
     t_start = time.time()
+    turn = 0
     for turn in range(1, a.max_turns + 1):
-        if game.done:
+        if result:
             break
         msgs, doors = C.messages(a.persona, screen, last, a.quiet)
         t0 = time.time()
         reply = ask(a.llm, msgs, a.temperature, 16 if a.quiet else 40)
         secs = time.time() - t0
         cmd = C.parse(reply, doors) or "look"
-        out = game.send(cmd)
-        new_screen = room_screen(out) if "You are in the" in out else out
+        if cmd in ("look", "map"):         # "map" = a look at its own notes, which the screen already shows
+            new_view = house.room()
+        else:
+            frm = view["room"]
+            new_view = house.walk(cmd)
+            if new_view.get("error"):
+                new_view = house.room()
+            elif new_view.get("turn", 0) > moves:
+                moves = new_view["turn"]
+                notes.move(frm, new_view["room"])
+        result = new_view.get("ended")
+        if not result:
+            notes.room(new_view["room"], new_view["doors"])
+        new_screen = "(the game is over)" if result else notes.screen(new_view)
         last = next_last(screen, last, cmd, new_screen) if cmd != "look" else last
+        view = new_view
         said = "\n".join(l for l in reply.splitlines() if "GO:" not in l).strip()
         print(f"{turn:4d} {secs:5.2f}s  -> {cmd:22s} {said}", flush=True)
         if report:
             report(turn=turn, sent=cmd, reply=(said or f"GO: {cmd}"), where=a.persona, speed=round(secs, 2))
         screen = new_screen
     el = time.time() - t_start
-    print(f"done: result={game.result} moves={game.moves} turns={turn} in {el:.0f}s ({el / max(1, turn):.2f} s/turn)", flush=True)
-    return 0 if game.result == "way_out" else 1
+    print(f"done: result={result} moves={moves} turns={turn} in {el:.0f}s ({el / max(1, turn):.2f} s/turn)", flush=True)
+    return 0 if result == "way_out" else 1
 
 
 if __name__ == "__main__":

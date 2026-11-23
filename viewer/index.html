@@ -59,6 +59,7 @@ aside { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .big { font-family: var(--f-display); font-size: 26px; font-weight: 600; line-height: 1; }
 .row { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; }
 .sw { display: inline-block; width: 14px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.said.nb { white-space: pre-wrap; max-height: 320px; overflow: auto; margin: 0; font-size: 11px; }
 .said { font-family: var(--f-mono); font-size: 12px; background: var(--bg); border-radius: 6px; padding: 6px 8px; overflow-wrap: anywhere; }
 .tag { font-size: 11px; color: var(--muted); }
 ol.moves { list-style: none; margin: 0; padding: 0; font-family: var(--f-mono); font-size: 12px; max-height: 170px; overflow: auto; }
@@ -90,6 +91,7 @@ svg.spark { width: 100%; height: 100px; display: block; }
         <dl class="kv" id="now"></dl>
         <div><div class="tag">What the player typed</div><div class="said" id="said">–</div></div>
       </div>
+      <div class="card" id="nbcard" hidden><h2>Player's notebook</h2><pre class="said nb" id="nbook">(blank)</pre><p class="note" id="nbnote"></p></div>
       <div class="card"><h2>Distance to the Way Out</h2><svg class="spark" id="spark" role="img" aria-label="Distance to goal after each move"></svg><p class="note" id="sparknote"></p></div>
       <div class="card"><h2>Moves</h2><ol class="moves" id="moves"></ol></div>
       <div class="card"><h2>Room under the pointer</h2><dl class="kv" id="hover"><dt>—</dt><dd>hover a room</dd></dl></div>
@@ -195,6 +197,8 @@ function panel() {
     + (t ? `<dt>Last move</dt><dd>${moveName(M.rooms[RUN.path[t - 1]].xyz, o.xyz)}</dd>` : '')
     + `<dt>Closest so far</dt><dd>${best} moves away</dd><dt>Revisits</dt><dd>${revisits}</dd><dt>Clock</dt><dd>${fmtT(RUN.times[t])} since start</dd>`;
   $('said').textContent = t ? RUN.said[t] || '–' : '(start)';
+  if (RUN.nb) { let k = Math.min(t, RUN.nb.length - 1); while (k > 0 && !RUN.nb[k]) k--; $('nbook').textContent = RUN.nb[k] || '(blank)';
+    $('nbnote').textContent = RUN.nbLine[k] ? `Last line typed: ${RUN.nbLine[k]}` : ''; }
   $('movelbl').textContent = `move ${t} / ${RUN.path.length - 1}`;
   document.querySelectorAll('#moves li').forEach((li, i) => li.classList.toggle('cur', i === t));
   const curLi = document.querySelector('#moves li.cur'); if (curLi) { const box = $('moves'), top = curLi.offsetTop - box.offsetTop; if (top < box.scrollTop || top + curLi.offsetHeight > box.scrollTop + box.clientHeight) box.scrollTop = top - box.clientHeight / 2; }
@@ -288,11 +292,11 @@ async function openRun(id) {
   Object.assign(LIVE, { run: id, es: null, lastSeq: -1, t0: 0, said: '', ended: null, maxMoves: 200 });
   const m = await getJSON(`api/runs/${encodeURIComponent(id)}/map`);
   if (m.dims !== 2) { $('sub').textContent = 'This view shows 2D runs only. Older 4D runs: the multidim branch has the 4D viewer.'; return; }
-  show(compact(m, id), 0); badge('connecting…'); connect();
+  show(compact(m, id), 0); RUN.nb = ['']; RUN.nbLine = ['']; $('nbcard').hidden = false; badge('connecting…'); connect();
 }
 function connect() {
   const es = new EventSource(withKey(`api/runs/${encodeURIComponent(LIVE.run)}/feed?since=${LIVE.lastSeq + 1}`)); LIVE.es = es;
-  for (const t of ['start', 'harness', 'walk', 'edit', 'refused', 'end']) es.addEventListener(t, onEv);
+  for (const t of ['start', 'harness', 'walk', 'edit', 'refused', 'device', 'end']) es.addEventListener(t, onEv);
   es.onopen = () => badge(LIVE.ended ? 'ended' : 'live', !LIVE.ended);
   es.onerror = () => { if (!LIVE.ended) badge('reconnecting…'); };
 }
@@ -305,7 +309,10 @@ async function onEv(ev) {
   else if (e.t === 'harness') LIVE.said = e.reply || e.sent || '';
   else if (e.t === 'walk') { const atEnd = S.t === RUN.path.length - 1;
     RUN.path.push(e.to); RUN.times.push(Math.max(0, Math.round(e.t_wall - LIVE.t0))); RUN.said.push(String(LIVE.said).slice(0, 120)); LIVE.said = '';
+    if (RUN.nb) { RUN.nb.push(''); RUN.nbLine.push(''); }
     render($('follow').checked && atEnd); }
+  else if (e.t === 'device' && RUN.nb) { const k = RUN.path.length - 1; RUN.nb[k] = e.screen || ''; RUN.nbLine[k] = String(e.input || '').slice(0, 120);
+    if (S.t === k) render(false); }
   else if (e.t === 'edit') { try { const m = await getJSON(`api/runs/${encodeURIComponent(LIVE.run)}/map`); RUN.meta.names = m.rooms.map(r => r.name); RUN.meta.exits = m.rooms.map(r => r.exits); M = buildMaze(RUN.meta); render(false); } catch {} }
   else if (e.t === 'end') { LIVE.ended = e.result || 'ended'; badge('ended'); subline(); if (LIVE.es) LIVE.es.close(); }
 }

@@ -3,6 +3,8 @@
 Contestant port (open to the runner's machine):
   GET  /v1/room                       the room the session stands in
   POST /v1/walk   {"to": "<name>"}    go through the door to that room
+  GET  /v1/device/notebook[?page=N]   the notebook page as text (the open page by default)
+  POST /v1/device/notebook {"line": "<command>"}   one line into the notebook -> reply and open page
 Admin port (signed requests only; firewalled from the runner's machine):
   POST /admin/runs                    start a run -> run_id, token
   GET  /admin/runs                    list runs
@@ -32,6 +34,7 @@ from .rulebook import RuleError
 from .runs import Store
 
 NOT_FOUND = b'{"error":"not found"}'
+DEVICE_PATH = re.compile(r"^/v1/device/(notebook)(?:\?page=(\d{1,4}))?$")
 RUN_PATH = re.compile(r"^/admin/runs/([0-9A-Za-z-]+)(/[a-z/]+)?$")
 
 
@@ -95,9 +98,13 @@ class ContestantHandler(_Base):
         return self.keeper.store.by_token(h[7:].strip())
 
     def do_GET(self):
-        run = self._run() if self.path == "/v1/room" else None
+        dev = DEVICE_PATH.match(self.path)
+        known = self.path == "/v1/room" or bool(dev)
+        run = self._run() if known else None
         if not run:
-            return self._404("contestant" if self.path == "/v1/room" else "path")
+            return self._404("contestant" if known else "path")
+        if dev:
+            return self._send(200, run.device_view(dev.group(1), int(dev.group(2)) if dev.group(2) else None))
         self._send(200, run.room_view())
 
     def do_POST(self):
@@ -105,9 +112,21 @@ class ContestantHandler(_Base):
             body = self._body()
         except ValueError:
             return self._404("body")
-        run = self._run() if self.path == "/v1/walk" else None
+        dev = DEVICE_PATH.match(self.path)
+        if dev and dev.group(2):
+            dev = None
+        known = self.path == "/v1/walk" or bool(dev)
+        run = self._run() if known else None
         if not run:
-            return self._404("contestant" if self.path == "/v1/walk" else "path")
+            return self._404("contestant" if known else "path")
+        if dev:
+            try:
+                line = json.loads(body or b"{}")["line"]
+                if not isinstance(line, str) or len(line) > 1000:
+                    raise TypeError
+            except (ValueError, KeyError, TypeError):
+                return self._send(400, {"error": "bad_request"})
+            return self._send(200, run.device_input(dev.group(1), line))
         try:
             to = json.loads(body or b"{}")["to"]
             if not isinstance(to, str):

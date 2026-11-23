@@ -17,7 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 from hypermaze import config  # noqa: E402
-from test_arena import Keeper, HOUSE, script  # noqa: E402
+from test_arena import Keeper, HOUSE  # noqa: E402
 
 HAVE_TOML = sys.version_info >= (3, 11)
 HM = os.path.join(ROOT, "scripts", "hm")
@@ -40,7 +40,7 @@ def clean_env(home, **extra):
     """An environment with a throwaway HOME and none of the variables that would override settings."""
     env = {k: v for k, v in os.environ.items()
            if k not in ("HOUSE_TOKEN", "HOUSE_SERVER", "HARNESS_KEY", "SSL_CERT_FILE", "MODEL",
-                        "ARENA_ADMIN_KEY", "ARENA_VIEWER_KEY", "XDG_CONFIG_HOME", "HM_HOME", "HM_REPO")}
+                        "ARENA_ADMIN_KEY", "ARENA_VIEWER_KEY", "XDG_CONFIG_HOME", "HM_HOME", "HM_REPO", "HOUSE_CONFIG")}
     env.update(HOME=home, PYTHONPATH=ROOT, **extra)
     return env
 
@@ -212,15 +212,15 @@ class TestRunnerSettings(unittest.TestCase):
         """The game the contestant sees is byte-identical whether set up by flags/env or by the settings file,
         and reading the settings adds nothing to stdout or stderr."""
         home = tempfile.mkdtemp()
-        lines, _, _ = script(11, "notes")
+        lines = ["look", "write hello", "read", "next", "back", "Nowhere", "quit"]
         rid1, tok1 = self.kp.new_run(dims=2, size=4, seed=11)
-        a, aerr, acode = self.play(["--notes"], clean_env(home, HOUSE_TOKEN=tok1, HOUSE_SERVER=self.kp.url), lines)
+        a, aerr, acode = self.play(["--notebook"], clean_env(home, HOUSE_TOKEN=tok1, HOUSE_SERVER=self.kp.url), lines)
         time.sleep(1.1)  # an identical admin request in the same second would reuse a single-use signature
         rid2, tok2 = self.kp.new_run(dims=2, size=4, seed=11)
         tf = write(os.path.join(home, "run.token"), tok2 + "\n")
-        write(os.path.join(home, "hypermaze", "config", "runner.toml"),   # the default location
-              f'server = "{self.kp.url}"\ntoken_file = "{tf}"\nmode = "notes"\n')
-        b, berr, bcode = self.play([], clean_env(home), lines)
+        cfgf = write(os.path.join(home, "player", "runner.toml"),
+                     f'server = "{self.kp.url}"\ntoken_file = "{tf}"\nmode = "notebook"\n')
+        b, berr, bcode = self.play([], clean_env(home, HOUSE_CONFIG=cfgf), lines)
         self.assertEqual(a, b)
         self.assertEqual((aerr, berr), ("", ""))
         self.assertEqual(acode, bcode)
@@ -228,13 +228,13 @@ class TestRunnerSettings(unittest.TestCase):
     def test_env_and_flags_beat_settings(self):
         home = tempfile.mkdtemp()
         _, tok = self.kp.new_run(dims=2, size=3, seed=5)
-        plain, _, _ = self.play(["--notes"], clean_env(home, HOUSE_TOKEN=tok, HOUSE_SERVER=self.kp.url), ["map", "quit"])
+        plain, _, _ = self.play(["--notebook"], clean_env(home, HOUSE_TOKEN=tok, HOUSE_SERVER=self.kp.url), ["read", "quit"])
         time.sleep(1.1)
         _, tok = self.kp.new_run(dims=2, size=3, seed=5)
         cfg = write(os.path.join(home, "r.toml"), 'server = "http://127.0.0.1:9"\ntoken_file = "/nonexistent"\n'
-                    'mode = "notebook"\nwidth = 30\n')
-        out, err, code = self.play(["--config", cfg, "--notes", "--width", "60"],
-                                   clean_env(home, HOUSE_TOKEN=tok, HOUSE_SERVER=self.kp.url), ["map", "quit"])
+                    'mode = "none"\n')
+        out, err, code = self.play(["--config", cfg, "--notebook"],
+                                   clean_env(home, HOUSE_TOKEN=tok, HOUSE_SERVER=self.kp.url), ["read", "quit"])
         self.assertIn("You are in the", out)
         self.assertEqual(out, plain)
         self.assertEqual(err, "")
