@@ -19,5 +19,11 @@
 # host[:port] that http:// visitors are redirected to (https) when their Host header is unusable.
 # public_host = "<keeper-host>:7344"
 
-# The page to serve (default: viewer/index.html in this repository).
-# page = "~/hypermaze/app/viewer/index.html"
+# The main page: the 3D Colosseum (default: viewer/colosseum.html in this repository).
+# page = "~/hypermaze/app/viewer/colosseum.html"
+
+# The flat grid view, served at /flat (default: viewer/index.html in this repository).
+# flat_page = "~/hypermaze/app/viewer/index.html"
+
+# Where saved matches are kept, on this machine only (default ~/hypermaze/colosseum/matches).
+# matches_dir = "~/hypermaze/colosseum/matches"

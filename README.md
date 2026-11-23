@@ -13,7 +13,7 @@ the optional TOML settings files need Python 3.11+.
 | Part | Code | What it does |
 |---|---|---|
 | **Map keeper** | `arena/` (`python3 -m arena serve`) | Holds the whole maze, the run's rulebook and every run's event log. Hands each contestant only its current room. Admins can watch, talk into the game, edit the maze under rules, or stop a run. |
-| **Colosseum viewer** | `arena/viewer.py` + `viewer/index.html` | A read-only web relay and page: the maze as a flat grid, the ant's trail, its spoken lines, distance to the exit over time. It signs keeper calls itself so the admin key never reaches a browser. |
+| **Colosseum viewer** | `arena/viewer.py` + `viewer/colosseum.html` | A web relay and the 3D Colosseum: the maze as a lit board in a stadium with a crowd, every ant of a race at once with its footprints and spoken lines, ant cams, a replay timeline with highlights, and saved matches. The flat grid view is still at `/flat`. It signs keeper calls itself so the admin key never reaches a browser; it only reads from the keeper. |
 | **The house** | `runner/house.py` | The text game the ants talk to. It asks the keeper for each room and prints the same screens as the offline game (`maze.py`). |
 | **The LLMs** | `ant/`, `play_llm.py` | The ants and the harness that drives them (below). |
 
@@ -152,7 +152,14 @@ tools/arena.py say <run id> "A cold draft blows through."
 tools/arena.py edit <run id> '{"type":"swap_rooms","a":"Coral Hall","b":"Iron Den"}' --why "test"
 tools/arena.py map <run id> -o maze.json
 tools/arena.py stop <run id> "The lights go out."
+tools/race.py --size 10 --seed 777 --pace 0.5      # practice race: the teacher bots on one maze
 ```
+
+`tools/race.py` starts one run per ant on the same maze and plays them at the same time with the
+strategy bots the ants learned from, so the Colosseum has a race to show without Pis or models.
+It reads the maze from its seed, so it is a test and show tool, never a contestant. A real ant can
+join the same race: start it on the same size, seed and loops within 20 minutes and the Colosseum
+puts them in one match.
 
 Edits: `remove_door`, `add_door`, `swap_rooms`, `shift_block`, `rename_room`, `message`. The keeper
 always refuses an edit that changes the room the player stands in or the doors it shows, moves or

@@ -79,8 +79,37 @@ python3 -m arena.viewer --keeper http://127.0.0.1:7342 --listen 0.0.0.0:7344 \
   --tls-cert ~/hypermaze-keeper-data/tls/viewer-chain.crt --tls-key ~/hypermaze-keeper-data/tls/viewer.key
 ```
 
-Open `https://<keeper-host>:7344/?key=<viewer key>` (or `http://` without the TLS options).
+Open `https://<viewer-host>:7344/?key=<viewer key>` (or `http://` without the TLS options).
 The page keeps the key for the tab; it is never written to the viewer's log.
+
+The main page is the 3D Colosseum (`viewer/colosseum.html`); the flat grid view is at `/flat`. Runs on
+the same maze (size, seed, loops) started within 20 minutes of each other show as one race.
+
+**Replay and saved matches.** Any run or race can be replayed from its event log: the timeline under
+the arena plays, pauses, speeds up to 16x and jumps to the highlights (wins, dead ends, Director
+edits). **Save match** copies the maze and every event of the race into one JSON file in
+`matches_dir` (default `~/hypermaze/colosseum/matches`) on the viewer's machine. Matches are only ever
+stored there: not in the browser, not at the keeper, never on the contestant's machine. A saved match
+replays even after the keeper's runs are gone.
+
+**Viewer on another machine than the keeper.** The keeper's admin port stays on its own
+`127.0.0.1`. Reach it through an SSH tunnel and point the viewer at the tunnel, for example as a user
+service on the viewer's machine:
+
+```ini
+# ~/.config/systemd/user/hypermaze-keeper-tunnel.service
+[Unit]
+Description=hypermaze keeper admin tunnel
+[Service]
+ExecStart=/usr/bin/ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -L 127.0.0.1:17342:127.0.0.1:7342 <keeper-host>
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=default.target
+```
+
+and `keeper = "http://127.0.0.1:17342"` in `viewer.toml`. The viewer needs a copy of `keys.json` with
+the `admin` and `viewer` keys.
 
 ## 4. Ant on a Raspberry Pi
 
