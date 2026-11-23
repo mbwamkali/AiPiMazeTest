@@ -139,8 +139,9 @@ scripts/hm update                # git pull and restart installed services
 scripts/hm config                # show every settings file, key/token-like values masked
 ```
 
-`hm install ant` writes `hypermaze-llm.service` (llama-server) and `hypermaze-ant.service` (plays
-the run named in `run_file`/`token_file`). `--dry-run` shows what any command would do.
+`hm install ant` writes `hypermaze-ant.service` (plays the run named in `run_file`/`token_file`) and
+`hypermaze-llm.service` (llama-server, started by each run and stopped after `idle_minutes`, default 5,
+with no work). `--dry-run` shows what any command would do.
 Details: [docs/setup.md](docs/setup.md#6-settings-files-and-services-hm).
 
 ## Admin tools

@@ -11,6 +11,9 @@
 # threads = 4
 # ctx = 4096
 # llm_port = 8095
+# Stop llama-server after this many minutes with no work; the next ant run starts it again.
+# 0 = keep it running.
+# idle_minutes = 5
 
 # --- the ant ---
 # The llama-server URL the ant talks to.
