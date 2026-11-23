@@ -1,0 +1,37 @@
+# Ant settings (Raspberry Pi): used by
+#   python3 -m ant.llm_server --config ~/hypermaze/config/ant.toml   (starts llama-server)
+#   python3 -m ant.pi_runner  --config ~/hypermaze/config/ant.toml   (plays one run)
+# Copy to ~/hypermaze/config/ant.toml and uncomment what you need.
+# Precedence: command-line flag > environment variable > this file > built-in default.
+# Never put keys or tokens in this file: only paths to the files that hold them.
+
+# --- llama-server (always listens on 127.0.0.1) ---
+# model = "~/hypermaze/models/ant-Q4_0.gguf"
+# llama_server = "~/llama.cpp/build/bin/llama-server"
+# threads = 4
+# ctx = 4096
+# llm_port = 8095
+
+# --- the ant ---
+# The llama-server URL the ant talks to.
+# llm = "http://127.0.0.1:8095"
+# NoMoe, Harry or Curlee.
+# persona = "NoMoe"
+# temperature = 0.7
+# max_turns = 600
+# quiet = false
+
+# --- the keeper ---
+# Contestant URL (the house) and harness URL (where turns are posted).
+# house = "https://<keeper-host>:7341"
+# report = "https://<keeper-host>:7343"
+# CA certificate for the keeper's TLS ($SSL_CERT_FILE wins over this).
+# ca_cert = "~/hypermaze/ca.crt"
+
+# --- secrets, by path only ---
+# File with the harness key on its first line ($HARNESS_KEY wins over this).
+# harness_key_file = "~/hypermaze/harness.key"
+# File with this run's token ($HOUSE_TOKEN wins over this).
+# token_file = "~/hypermaze/run.token"
+# File with this run's id (--run wins over this).
+# run_file = "~/hypermaze/run.id"

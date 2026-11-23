@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+
+# run logs and outputs
+*-maze.log
+*-llm.log
+*-speed.log
+*-moves.jsonl
+*-inject.jsonl
+maze.log
+moves.jsonl
+llm.log
+speed.log
+*.out
+*.log
+tests/last_fail_input.txt
+runs/
+lessons*.jsonl
+
+# keeper data, keys and certificates: never commit these
+hypermaze-keeper-data/
+keys.json
+*.key
+*.crt
+*.pem
+*.csr
+*.srl
+tls/
+
+# models
+*.gguf
+*.safetensors
+*.bin
+models/
+llama.cpp/
+
+# not part of this repository
+hypermaze-text/
+tests/compare.py
+tests/data/
+*.service
+livetest.sh
+pi-time.sh
+
+# real settings files (only the examples are committed)
+config/*.toml
+!config/*.example.toml

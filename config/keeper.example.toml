@@ -1,0 +1,24 @@
+# Keeper (map keeper) settings: python3 -m arena serve --config ~/hypermaze/config/keeper.toml
+# Copy to ~/hypermaze/config/keeper.toml and uncomment what you need.
+# Precedence: command-line flag > environment variable > this file > built-in default.
+# Never put keys or tokens in this file: only paths to the files that hold them.
+
+# Folder for run logs, access.log and (by default) keys.json.
+# data = "~/hypermaze-keeper-data"
+
+# Contestant port (the ants' runner). 0.0.0.0 opens it to the network; default 127.0.0.1.
+# contestant = "0.0.0.0:7341"
+
+# Admin port (tools/arena.py, the viewer). Plain HTTP: keep it on 127.0.0.1.
+# admin = "127.0.0.1:7342"
+
+# Harness port (ants post their turns here). Default 127.0.0.1.
+# harness = "0.0.0.0:7343"
+
+# TLS for the contestant and harness ports (admin stays plain HTTP).
+# tls_cert = "~/hypermaze-keeper-data/tls/keeper-chain.crt"
+# tls_key = "~/hypermaze-keeper-data/tls/keeper.key"
+# (Ants trust it through the CA certificate, e.g. ~/hypermaze-keeper-data/tls/hypermaze-home-ca.crt.)
+
+# keys.json with the admin, harness and viewer keys (default <data>/keys.json).
+# keys_file = "~/hypermaze-keeper-data/keys.json"

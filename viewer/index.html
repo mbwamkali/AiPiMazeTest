@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Arena Replay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Replay of one keeper run on a flat 2D maze: one square per room, walls as lines, doors as gaps. */
+:root {
+  --bg: #eef0f4; --panel: #ffffff; --fg: #1a1f2b; --muted: #5d6577; --line: #d5d9e2;
+  --d0: #f3f5f9; --d1: #e3e7ef; --d2: #cfd5e1; --wall: #2a3242; --edge: #2a3242; --ring: #aab2c2;
+  --accent: #d1344f; --gold: #e0a019; --solfill: #f7e3b0; --v1: #f6d7dd; --v2: #eeb0bc; --v3: #e2899b;
+  --ax0: #d9473b; --ax1: #2f9e55; --ax2: #2f6fd6; --ax3: #e07b00;
+  --f-display: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1218; --panel: #171b24; --fg: #e4e7ee; --muted: #8e97aa; --line: #2a303d;
+  --d0: #262d3b; --d1: #1e2430; --d2: #151a23; --wall: #d3d9e5; --edge: #d3d9e5; --ring: #4a5366;
+  --accent: #ff5a74; --gold: #f2b33d; --solfill: #4a3c1c; --v1: #4a2630; --v2: #6b2c3b; --v3: #8f3348;
+  --ax0: #ff6b5e; --ax1: #4cc477; --ax2: #5b95ff; --ax3: #ffa53d; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f1218; --panel: #171b24; --fg: #e4e7ee; --muted: #8e97aa; --line: #2a303d;
+  --d0: #262d3b; --d1: #1e2430; --d2: #151a23; --wall: #d3d9e5; --edge: #d3d9e5; --ring: #4a5366;
+  --accent: #ff5a74; --gold: #f2b33d; --solfill: #4a3c1c; --v1: #4a2630; --v2: #6b2c3b; --v3: #8f3348;
+  --ax0: #ff6b5e; --ax1: #4cc477; --ax2: #5b95ff; --ax3: #ffa53d; color-scheme: dark }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 14px; }
+.wrap { padding: 12px max(16px, env(safe-area-inset-right, 0px)) 20px max(16px, env(safe-area-inset-left, 0px)); max-width: 1600px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
+h1 { font-family: var(--f-display); font-weight: 600; font-size: 22px; margin: 0; }
+.sub { color: var(--muted); font-size: 13px; }
+.badge { font-family: var(--f-mono); font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.badge.live { color: var(--accent); border-color: var(--accent); }
+.bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+button, select { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; }
+button { cursor: pointer; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[type=range] { width: min(260px, 60vw); accent-color: var(--accent); }
+.chk { display: inline-flex; gap: 5px; align-items: center; font-size: 13px; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px; }
+@media (max-width: 900px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.stage { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; height: calc(100vh - 150px); min-height: 380px; overflow: hidden; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+aside { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card h2 { font-family: var(--f-display); font-size: 15px; margin: 0; font-weight: 600; }
+.note { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 13px; margin: 0; font-variant-numeric: tabular-nums; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; font-family: var(--f-mono); overflow-wrap: anywhere; }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.big { font-family: var(--f-display); font-size: 26px; font-weight: 600; line-height: 1; }
+.row { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; }
+.sw { display: inline-block; width: 14px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.said { font-family: var(--f-mono); font-size: 12px; background: var(--bg); border-radius: 6px; padding: 6px 8px; overflow-wrap: anywhere; }
+.tag { font-size: 11px; color: var(--muted); }
+ol.moves { list-style: none; margin: 0; padding: 0; font-family: var(--f-mono); font-size: 12px; max-height: 170px; overflow: auto; }
+ol.moves li { display: grid; grid-template-columns: 34px 1fr auto; gap: 6px; padding: 2px 4px; border-radius: 4px; cursor: pointer; }
+ol.moves li.cur { background: var(--v1); }
+ol.moves li .d { color: var(--muted); }
+svg.spark { width: 100%; height: 100px; display: block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>Arena Replay</h1><span class="badge" id="badge">replay</span><span class="sub" id="sub"></span></header>
+  <div class="bar">
+    <div class="group">
+      <button id="back" aria-label="Step back">◀</button><button id="play">Play</button><button id="fwd" aria-label="Step forward">▶</button>
+      <input id="scrub" type="range" min="0" max="0" value="0" aria-label="Replay position">
+      <span id="movelbl" class="mono" style="font-size:12px;color:var(--muted)"></span>
+    </div>
+    <div class="group"><span class="lbl">Speed</span><select id="speed"><option value="600">slow</option><option value="250" selected>normal</option><option value="90">fast</option></select></div>
+    <div class="group"><span class="lbl">Trail</span><select id="trail"><option value="8">8 moves</option><option value="20" selected>20 moves</option><option value="9999">all</option></select></div>
+    <label class="chk"><input id="sol" type="checkbox"> Shortest route</label>
+    <div class="group" id="livebox" hidden><span class="lbl">Run</span><select id="runsel" aria-label="Run"></select><label class="chk"><input id="follow" type="checkbox" checked> Follow live</label></div>
+  </div>
+  <div class="main">
+    <div class="stage" id="stage"><canvas id="cv" aria-label="2D maze with the player's route"></canvas></div>
+    <aside>
+      <div class="card"><h2>Now</h2>
+        <div class="row"><div><div class="big" id="nmove">0</div><div class="tag" id="nmovecap">moves</div></div><div><div class="big" id="ndist">–</div><div class="tag">to the Way Out</div></div><div><div class="big" id="nseen">–</div><div class="tag">rooms seen</div></div></div>
+        <dl class="kv" id="now"></dl>
+        <div><div class="tag">What the player typed</div><div class="said" id="said">–</div></div>
+      </div>
+      <div class="card"><h2>Distance to the Way Out</h2><svg class="spark" id="spark" role="img" aria-label="Distance to goal after each move"></svg><p class="note" id="sparknote"></p></div>
+      <div class="card"><h2>Moves</h2><ol class="moves" id="moves"></ol></div>
+      <div class="card"><h2>Room under the pointer</h2><dl class="kv" id="hover"><dt>—</dt><dd>hover a room</dd></dl></div>
+      <div class="card"><h2>Reading it</h2><p class="note" id="legend"></p>
+        <p class="note">Each square is one room, seen from above, north at the top. From a room you can go north, south, east or west wherever there is no wall.</p>
+        <p class="note">Red line = the player's recent path, red dot = where the player is. Pink rooms were visited (darker = more often). Gold = the Way Out. Scroll to zoom (room names appear), drag to pan, double-click to reset.</p></div>
+    </aside>
+  </div>
+</div>
+
+<!-- Snapshot from the keeper (map + walk events). The live version fills this from the relay instead. -->
+<script type="application/json" id="run">{"run":"sample-2d-seed7","dims":2,"size":8,"seed":7,"start":43,"goal":33,"shortest":25,"max_moves":200,"mode":"sample: a simple depth-first bot","snapshot":"built from seed 7, not a real run","names":["Lantern Well","Cobalt Orchard","Quiet Den","Granite Garden","Mossy Cellar","Saffron Rookery","Coral Theatre","Cobalt Courtyard","Gilded Cellar","Echoing Larder","Marble Archive","Saffron Archive","Willow Pantry","Rusted Ballroom","Painted Orchard","Gilded Mill","Pale Rookery","Copper Attic","Cobalt Crypt","Copper Forge","Hollow Belfry","Copper Grotto","Whispering Vault","Frozen Archive","Whispering Armory","Ember Library","Velvet Gallery","Saffron Stable","Painted Courtyard","Mossy Vault","Quiet Chamber","Bitter Stair","Misty Well","Way Out","Cedar Rookery","Mossy Forge","Ivory Archive","Thorn Loft","Dusty Cistern","Tilted Kitchen","Salt Ballroom","Hollow Grotto","Echoing Attic","Jade Gallery","Pale Foyer","Lantern Ballroom","Jade Garden","Bitter Tower","Tilted Shrine","Glass Attic","Ember Kitchen","Jade Library","Pale Tower","Echoing Library","Gilded Workshop","Painted Cellar","Whispering Ballroom","Misty Armory","Pale Parlor","Velvet Kitchen","Cobalt Cistern","Iron Nursery","Thorn Forge","Glass Study"],"exits":[[8],[9,2],[10,1],[4,11],[3,5],[6,13,4],[7,5],[15,6],[0,9],[1,8],[2,18],[3,19],[20],[5,21],[15],[14,7],[24,17],[25,16],[26,10],[20,11],[12,19,28],[22,13],[21,23],[22,31],[32,16],[33,17],[34,18],[28],[20,29,27],[30,28],[29],[23,39],[40,24],[25],[35,26],[43,34],[44,37],[36,38],[37,46],[31,47],[32,48],[42,49],[41,50],[44,35],[43,36],[53],[47,38],[55,39,46],[56,40,49],[41,48],[51,42],[50,52],[51,53],[52,54,45],[53,62],[47,63],[57,48],[58,56],[57,59],[58,60],[59,61],[60],[63,54],[55,62]],"steps":[[44,3,"GO: Pale Foyer"],[36,6,"GO: Ivory Archive"],[37,9,"GO: Thorn Loft"],[38,12,"GO: Dusty Cistern"],[46,15,"GO: Jade Garden"],[47,18,"GO: Bitter Tower"],[55,21,"GO: Painted Cellar"],[63,24,"GO: Glass Study"],[62,27,"GO: Thorn Forge"],[54,30,"GO: Gilded Workshop"],[53,33,"GO: Echoing Library"],[52,36,"GO: Pale Tower"],[51,39,"GO: Jade Library"],[50,42,"GO: Ember Kitchen"],[42,45,"GO: Echoing Attic"],[41,48,"GO: Hollow Grotto"],[49,51,"GO: Glass Attic"],[48,54,"GO: Tilted Shrine"],[56,57,"GO: Whispering Ballroom"],[57,60,"GO: Misty Armory"],[58,63,"GO: Pale Parlor"],[59,66,"GO: Velvet Kitchen"],[60,69,"GO: Cobalt Cistern"],[61,72,"GO: Iron Nursery"],[60,75,"GO: Cobalt Cistern"],[59,78,"GO: Velvet Kitchen"],[58,81,"GO: Pale Parlor"],[57,84,"GO: Misty Armory"],[56,87,"GO: Whispering Ballroom"],[48,90,"GO: Tilted Shrine"],[40,93,"GO: Salt Ballroom"],[32,96,"GO: Misty Well"],[24,99,"GO: Whispering Armory"],[16,102,"GO: Pale Rookery"],[17,105,"GO: Copper Attic"],[25,108,"GO: Ember Library"],[33,111,"GO: Way Out"]]}</script>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+let C = {};
+function readColors() { const cs = getComputedStyle(document.documentElement); for (const k of ['panel','fg','muted','line','d0','d1','d2','wall','edge','ring','accent','gold','solfill','v1','v2','v3','ax0','ax1','ax2','ax3']) C[k] = cs.getPropertyValue('--' + k).trim(); C.ax = [C.ax0, C.ax1, C.ax2, C.ax3]; C.depth = [C.d0, C.d1, C.d2]; C.vis = [C.v1, C.v2, C.v3]; }
+readColors();
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ---- geometry: a flat grid. Room id = x + n*y (keeper numbering); y grows downward, so y+ is south ----
+function moveName(p, q) { const dx = q[0] - p[0], dy = q[1] - p[1]; if (Math.abs(dx) + Math.abs(dy) !== 1) return '?'; return dx > 0 ? 'east' : dx < 0 ? 'west' : dy > 0 ? 'south' : 'north'; }
+
+// ---- the maze, built from the keeper's map ------------------------------------------------------
+let M = null, RUN = null;
+function buildMaze(d) {
+  const n = d.size, N = d.names.length, rooms = [];
+  for (let i = 0; i < N; i++) rooms.push({ xyz: [i % n, Math.floor(i / n)] });
+  const adj = d.exits.map(l => l.slice()), open = new Set();
+  adj.forEach((l, i) => l.forEach(j => open.add(Math.min(i, j) + ',' + Math.max(i, j))));
+  const bfs = s => { const dist = new Array(N).fill(-1), q = [s]; dist[s] = 0; for (let i = 0; i < q.length; i++) for (const x of adj[q[i]]) if (dist[x] < 0) { dist[x] = dist[q[i]] + 1; q.push(x); } return dist; };
+  const dist = bfs(d.goal), sol = [d.start]; while (sol.at(-1) !== d.goal) { const c = sol.at(-1); sol.push(adj[c].find(x => dist[x] === dist[c] - 1)); }
+  return { n, N, rooms, adj, open, dist, sol, start: d.start, goal: d.goal, names: d.names };
+}
+const hasDoor = (a, b) => M.open.has(Math.min(a, b) + ',' + Math.max(a, b));
+function loadRun(d) {
+  RUN = { meta: d, path: [d.start, ...d.steps.map(s => s[0])], times: [0, ...d.steps.map(s => s[1])], said: ['', ...d.steps.map(s => s[2] || '')] };
+  M = buildMaze(d);
+  subline();
+  $('scrub').max = RUN.path.length - 1;
+}
+
+function subline() { const d = RUN.meta;
+  $('sub').textContent = (LIVE.run ? 'Live from the keeper · ' : '') + `run ${d.run} · 2D, ${d.size}×${d.size} (${M.N} rooms)` + (d.mode ? ` · ${d.mode}` : '') + ` · ${d.max_moves}-move limit`
+    + (LIVE.ended ? ` · ended: ${LIVE.ended}` : '') + (d.snapshot && !LIVE.run ? ` · ${d.snapshot}` : ''); }
+
+// ---- state & layout -------------------------------------------------------------------------------
+const S = { t: 0, sol: false, playing: false, trail: 20 };
+let visits, HOVER = -1, VIEW = { s: 1, tx: 0, ty: 0 };
+const cv = $('cv'), ctx = cv.getContext('2d'); let W = 0, H = 0, DPR = 1, GEO = null;
+function geometry() {
+  const n = M.n, pad = 28, R = Math.min((W - 2 * pad) / n, (H - 2 * pad) / n), ox = (W - R * n) / 2, oy = (H - R * n) / 2;
+  return { R, ox, oy, center: i => { const [x, y] = M.rooms[i].xyz; return [ox + R * (x + 0.5), oy + R * (y + 0.5)]; } };
+}
+function line(p, s) { ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(s[0], s[1]); ctx.stroke(); }
+function roomFill(i) { if (i === M.goal) return C.gold; if (visits[i]) return C.vis[Math.min(2, visits[i] - 1)]; return C.d0; }
+const fontFam = () => getComputedStyle(document.body).getPropertyValue('--f-display') || 'sans-serif';
+
+function draw() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.fillStyle = C.panel; ctx.fillRect(0, 0, W, H);
+  ctx.setTransform(DPR * VIEW.s, 0, 0, DPR * VIEW.s, DPR * VIEW.tx, DPR * VIEW.ty);
+  const { R, ox, oy, center } = GEO, n = M.n, lw = Math.min(4, Math.max(1.5, R * VIEW.s * 0.06)) / VIEW.s;
+  // rooms
+  for (let i = 0; i < M.N; i++) { const [x, y] = M.rooms[i].xyz; ctx.fillStyle = roomFill(i); ctx.fillRect(ox + R * x, oy + R * y, R, R); }
+  if (HOVER >= 0) { const [x, y] = M.rooms[HOVER].xyz; ctx.strokeStyle = C.accent; ctx.lineWidth = 2 / VIEW.s; ctx.strokeRect(ox + R * x + 3 / VIEW.s, oy + R * y + 3 / VIEW.s, R - 6 / VIEW.s, R - 6 / VIEW.s); }
+  // room names once zoomed in far enough to read them
+  if (R * VIEW.s > 72) { ctx.fillStyle = C.muted; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; const fs = Math.max(9 / VIEW.s, R * 0.12); ctx.font = `500 ${fs}px sans-serif`;
+    for (let i = 0; i < M.N; i++) { const [cx, cy] = center(i), words = M.names[i].split(' '); words.forEach((w, k) => ctx.fillText(w, cx, cy + R * 0.2 + (k - (words.length - 1) / 2) * fs * 1.15)); } }
+  // walls: every side without a door, plus the outer border
+  ctx.strokeStyle = C.wall; ctx.lineWidth = lw; ctx.lineCap = 'square'; ctx.beginPath();
+  for (let i = 0; i < M.N; i++) { const [x, y] = M.rooms[i].xyz, X = ox + R * x, Y = oy + R * y;
+    if (x === n - 1 || !hasDoor(i, i + 1)) { ctx.moveTo(X + R, Y); ctx.lineTo(X + R, Y + R); }
+    if (y === n - 1 || !hasDoor(i, i + n)) { ctx.moveTo(X, Y + R); ctx.lineTo(X + R, Y + R); }
+    if (x === 0) { ctx.moveTo(X, Y); ctx.lineTo(X, Y + R); }
+    if (y === 0) { ctx.moveTo(X, Y); ctx.lineTo(X + R, Y); } }
+  ctx.stroke();
+  // shortest route
+  if (S.sol) { ctx.save(); ctx.strokeStyle = C.gold; ctx.globalAlpha = 0.9; ctx.lineWidth = Math.max(2, R * 0.1); ctx.setLineDash([R * 0.18, R * 0.14]); ctx.lineJoin = 'round'; ctx.lineCap = 'round'; polyline(M.sol, M.sol.length); ctx.restore(); }
+  // the player's trail, fading with age (centre to centre through door gaps, so it never crosses a wall)
+  { const P = RUN.path, t = S.t, from = Math.max(1, t - S.trail + 1); ctx.save(); ctx.strokeStyle = C.accent; ctx.lineCap = 'round'; ctx.lineWidth = Math.max(2 / VIEW.s, R * 0.09);
+    for (let k = from; k <= t; k++) { const [a, b] = seg(P[k - 1], P[k]); ctx.globalAlpha = S.trail > 999 ? 0.55 : 0.15 + 0.85 * (k - from + 1) / (t - from + 1); line(a, b); } ctx.restore(); }
+  // start ring, player dot, labels
+  { const [cx, cy] = center(M.start); ctx.setLineDash([3 / VIEW.s, 3 / VIEW.s]); ctx.strokeStyle = C.fg; ctx.lineWidth = 1.5 / VIEW.s; ctx.beginPath(); ctx.arc(cx, cy, R * 0.32, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
+  { const [cx, cy] = center(RUN.path[S.t]); ctx.beginPath(); ctx.arc(cx, cy, R * 0.22, 0, Math.PI * 2); ctx.fillStyle = C.accent; ctx.fill(); ctx.strokeStyle = C.panel; ctx.lineWidth = 2 / VIEW.s; ctx.stroke(); }
+  ctx.font = `600 ${Math.max(9, R * 0.2)}px ${fontFam()}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const [i, txt] of [[M.start, 'START'], [M.goal, 'OUT']]) { const [cx, cy] = center(i), ty = cy - R * 0.36; ctx.fillStyle = C.fg; ctx.strokeStyle = C.panel; ctx.lineWidth = 3 / VIEW.s; ctx.strokeText(txt, cx, ty); ctx.fillText(txt, cx, ty); }
+  // compass
+  ctx.font = `500 ${Math.max(10, R * 0.2)}px sans-serif`; ctx.fillStyle = C.muted; ctx.fillText('N', ox + R * n / 2, oy - 14);
+}
+function seg(i, j) { return [GEO.center(i), GEO.center(j)]; }
+function polyline(P, upto) { ctx.beginPath(); for (let k = 0; k < upto; k++) { const [x, y] = GEO.center(P[k]); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.stroke(); }
+
+// ---- side panel ------------------------------------------------------------------------------------
+function recount() { visits = new Uint16Array(M.N); for (let i = 0; i <= S.t; i++) visits[RUN.path[i]]++; }
+function fmtT(s) { const m = Math.floor(s / 60), r = s % 60; return `${m}:${String(r).padStart(2, '0')}`; }
+function panel() {
+  const t = S.t, cur = RUN.path[t], o = M.rooms[cur], seen = new Set(); for (let i = 0; i <= t; i++) { seen.add(RUN.path[i]); for (const x of M.adj[RUN.path[i]]) seen.add(x); }
+  let revisits = 0; { const v = new Set(); for (let i = 0; i <= t; i++) { if (v.has(RUN.path[i])) revisits++; v.add(RUN.path[i]); } }
+  const best = Math.min(...RUN.path.slice(0, t + 1).map(i => M.dist[i]));
+  $('nmove').textContent = t; $('nmovecap').textContent = `of ${RUN.meta.max_moves} moves`; $('ndist').textContent = M.dist[cur]; $('nseen').textContent = seen.size;
+  $('now').innerHTML = `<dt>Room</dt><dd>${esc(M.names[cur])}${cur === M.goal ? ' · OUT' : ''}</dd><dt>(x, y)</dt><dd>(${o.xyz.join(', ')})</dd>`
+    + (t ? `<dt>Last move</dt><dd>${moveName(M.rooms[RUN.path[t - 1]].xyz, o.xyz)}</dd>` : '')
+    + `<dt>Closest so far</dt><dd>${best} moves away</dd><dt>Revisits</dt><dd>${revisits}</dd><dt>Clock</dt><dd>${fmtT(RUN.times[t])} since start</dd>`;
+  $('said').textContent = t ? RUN.said[t] || '–' : '(start)';
+  $('movelbl').textContent = `move ${t} / ${RUN.path.length - 1}`;
+  document.querySelectorAll('#moves li').forEach((li, i) => li.classList.toggle('cur', i === t));
+  const curLi = document.querySelector('#moves li.cur'); if (curLi) { const box = $('moves'), top = curLi.offsetTop - box.offsetTop; if (top < box.scrollTop || top + curLi.offsetHeight > box.scrollTop + box.clientHeight) box.scrollTop = top - box.clientHeight / 2; }
+  spark();
+}
+function movesList() { const P = RUN.path; $('moves').innerHTML = P.map((r, i) => `<li data-t="${i}"><span class="d">${i}</span><span>${esc(M.names[r])}</span><span class="d">${i ? moveName(M.rooms[P[i - 1]].xyz, M.rooms[r].xyz) : 'start'}</span></li>`).join(''); }
+$('moves').addEventListener('click', e => { const li = e.target.closest('li'); if (li) setT(+li.dataset.t); });
+function spark() {
+  const svg = $('spark'), w = svg.clientWidth || 260, h = 100, P = RUN.path, mx = Math.max(...M.dist), nMax = Math.max(P.length - 1, 1);
+  const X = i => 4 + (w - 8) * i / nMax, Y = d => 6 + (h - 14) * d / mx;
+  const pts = P.map((r, i) => `${X(i).toFixed(1)},${Y(M.dist[r]).toFixed(1)}`).join(' ');
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.innerHTML = `<line x1="4" x2="${w - 4}" y1="${Y(0)}" y2="${Y(0)}" stroke="${C.gold}" stroke-width="1.5"/><line x1="4" x2="${w - 4}" y1="${Y(M.dist[M.start])}" y2="${Y(M.dist[M.start])}" stroke="${C.line}" stroke-dasharray="3 3"/>`
+    + `<polyline points="${pts}" fill="none" stroke="${C.muted}" stroke-width="1.5" stroke-linejoin="round"/>`
+    + `<circle cx="${X(S.t)}" cy="${Y(M.dist[P[S.t]])}" r="3.5" fill="${C.accent}"/>`;
+  $('sparknote').textContent = `Top line = the Way Out (0). Dashed = the start (${M.dist[M.start]} away). Furthest from the exit so far: ${Math.max(...P.slice(0, S.t + 1).map(r => M.dist[r]))}.`;
+}
+function showHover() {
+  if (HOVER < 0) { $('hover').innerHTML = '<dt>—</dt><dd>hover a room</dd>'; return; }
+  const o = M.rooms[HOVER], ex = M.adj[HOVER].map(j => moveName(o.xyz, M.rooms[j].xyz)).sort().join('  ') || 'none';
+  const firstVisit = RUN.path.indexOf(HOVER);
+  $('hover').innerHTML = `<dt>Room</dt><dd>${esc(M.names[HOVER])} #${HOVER}</dd><dt>(x, y)</dt><dd>(${o.xyz.join(', ')})</dd><dt>Exits</dt><dd>${ex}</dd><dt>To goal</dt><dd>${M.dist[HOVER]} moves</dd><dt>Visits</dt><dd>${visits[HOVER]} by move ${S.t}${firstVisit >= 0 ? ` (first at move ${firstVisit})` : ''}</dd>`;
+}
+
+// ---- pointer: hover, zoom, pan ----------------------------------------------------------------------
+cv.addEventListener('mousemove', ev => {
+  if (DRAG) return; const rc = cv.getBoundingClientRect(), X = ((ev.clientX - rc.left - VIEW.tx) / VIEW.s - GEO.ox) / GEO.R, Y = ((ev.clientY - rc.top - VIEW.ty) / VIEW.s - GEO.oy) / GEO.R;
+  const x = Math.floor(X), y = Math.floor(Y), h = x >= 0 && y >= 0 && x < M.n && y < M.n ? x + M.n * y : -1;
+  if (h !== HOVER) { HOVER = h; showHover(); draw(); } });
+let DRAG = null;
+cv.addEventListener('wheel', ev => { ev.preventDefault(); const rc = cv.getBoundingClientRect(), mx = ev.clientX - rc.left, my = ev.clientY - rc.top;
+  const ns = Math.max(1, Math.min(10, VIEW.s * Math.exp(-ev.deltaY * 0.0015))), f = ns / VIEW.s; VIEW.tx = mx - (mx - VIEW.tx) * f; VIEW.ty = my - (my - VIEW.ty) * f; VIEW.s = ns;
+  if (ns === 1) VIEW.tx = VIEW.ty = 0; draw(); }, { passive: false });
+cv.addEventListener('pointerdown', ev => { DRAG = { x: ev.clientX, y: ev.clientY, tx: VIEW.tx, ty: VIEW.ty, moved: false }; cv.setPointerCapture(ev.pointerId); });
+cv.addEventListener('pointermove', ev => { if (!DRAG) return; const dx = ev.clientX - DRAG.x, dy = ev.clientY - DRAG.y; if (Math.abs(dx) + Math.abs(dy) > 3) DRAG.moved = true; if (DRAG.moved && VIEW.s > 1) { VIEW.tx = DRAG.tx + dx; VIEW.ty = DRAG.ty + dy; draw(); } });
+cv.addEventListener('pointerup', () => { DRAG = null; });
+cv.addEventListener('dblclick', () => { VIEW = { s: 1, tx: 0, ty: 0 }; draw(); });
+cv.addEventListener('mouseleave', () => { HOVER = -1; showHover(); draw(); });
+
+// ---- controls -----------------------------------------------------------------------------------------
+function setT(t) { if (!ready) return; S.t = Math.max(0, Math.min(RUN.path.length - 1, t)); $('scrub').value = S.t; recount(); panel(); showHover(); draw(); }
+let timer = null;
+function stopPlay() { S.playing = false; clearInterval(timer); $('play').textContent = 'Play'; }
+function startPlay() { S.playing = true; $('play').textContent = 'Pause'; clearInterval(timer); if (S.t >= RUN.path.length - 1) setT(0);
+  timer = setInterval(() => { if (S.t >= RUN.path.length - 1) { stopPlay(); return; } setT(S.t + 1); }, +$('speed').value); }
+$('play').onclick = () => S.playing ? stopPlay() : startPlay();
+$('speed').onchange = () => { if (S.playing) startPlay(); };
+$('back').onclick = () => { stopPlay(); setT(S.t - 1); }; $('fwd').onclick = () => { stopPlay(); setT(S.t + 1); };
+$('scrub').oninput = e => { stopPlay(); setT(+e.target.value); };
+$('trail').onchange = e => { S.trail = +e.target.value; draw(); };
+$('sol').onchange = e => { S.sol = e.target.checked; draw(); };
+document.addEventListener('keydown', e => { if (e.target.closest('select,input')) return; if (e.key === 'ArrowLeft') $('back').click(); else if (e.key === 'ArrowRight') $('fwd').click(); else if (e.key === ' ') { e.preventDefault(); $('play').click(); } });
+function legend() { $('legend').textContent = 'Dark lines are walls. A gap between two rooms is a door.'; }
+const reTheme = () => { readColors(); if (M) { legend(); spark(); draw(); } };
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', reTheme);
+new MutationObserver(reTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+let ready = false, booted = false;
+function show(d, t) { loadRun(d); movesList(); legend(); GEO = geometry(); ready = true; setT(t == null ? RUN.path.length - 1 : t); }
+function resize() { const r = $('stage').getBoundingClientRect(); DPR = Math.min(2, window.devicePixelRatio || 1); W = r.width; H = r.height; cv.width = W * DPR; cv.height = H * DPR;
+  if (!booted) { booted = true; boot(); return; }
+  if (!ready) return; M = buildMaze(RUN.meta); GEO = geometry(); setT(S.t); }
+new ResizeObserver(resize).observe($('stage'));
+
+// ---- live mode: when this page is served by the viewer relay, follow the keeper's feed ---------------
+// The relay answers api/runs, api/runs/<id>/map and api/runs/<id>/feed (server-sent events). Anywhere else, the snapshot above plays.
+// The viewer key comes in once as ?key=...; keep it for this tab, take it out of the address bar, and add it to every call.
+const VKEY = (() => { const u = new URL(location.href); let k = u.searchParams.get('key');
+  try { if (k) sessionStorage.setItem('vkey', k); else k = sessionStorage.getItem('vkey'); } catch {}
+  if (u.searchParams.has('key')) { u.searchParams.delete('key'); history.replaceState(null, '', u); }
+  return k || ''; })();
+function withKey(u) { return VKEY ? u + (u.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(VKEY) : u; }
+const LIVE = { run: null, es: null, lastSeq: -1, t0: 0, said: '', ended: null };
+async function getJSON(u) { const r = await fetch(withKey(u), { cache: 'no-store' }); if (!r.ok || !(r.headers.get('content-type') || '').includes('json')) throw new Error(u); return r.json(); }
+async function boot() {
+  let runs = null; try { runs = (await getJSON('api/runs')).runs; } catch { runs = null; }
+  if (!runs || !runs.length) { show(JSON.parse($('run').textContent)); return; }
+  runs.sort((a, b) => b.run_id.localeCompare(a.run_id));
+  const four = runs.filter(r => r.settings && r.settings.dims === 2);
+  $('runsel').innerHTML = four.map(r => `<option value="${esc(r.run_id)}">${esc(r.run_id)} · ${r.moves} moves${r.ended ? ' · ended' : ''}</option>`).join('');
+  $('livebox').hidden = false; document.querySelector('h1').textContent = 'Arena Live';
+  const want = new URLSearchParams(location.search).get('run'); const pick = four.find(r => r.run_id === want) || four[0];
+  if (!pick) { show(JSON.parse($('run').textContent)); return; }
+  $('runsel').value = pick.run_id; await openRun(pick.run_id);
+}
+$('runsel').onchange = e => { const u = new URL(location.href); u.searchParams.set('run', e.target.value); history.replaceState(null, '', u); openRun(e.target.value); };
+function compact(m, id) { return { run: id, dims: m.dims, size: m.size, seed: m.seed, start: m.start, goal: m.goal, shortest: m.shortest, max_moves: LIVE.maxMoves || 200, mode: '', names: m.rooms.map(r => r.name), exits: m.rooms.map(r => r.exits), steps: [] }; }
+function badge(text, live) { $('badge').textContent = text; $('badge').classList.toggle('live', !!live); }
+async function openRun(id) {
+  if (LIVE.es) LIVE.es.close(); stopPlay();
+  Object.assign(LIVE, { run: id, es: null, lastSeq: -1, t0: 0, said: '', ended: null, maxMoves: 200 });
+  const m = await getJSON(`api/runs/${encodeURIComponent(id)}/map`);
+  if (m.dims !== 2) { $('sub').textContent = 'This view shows 2D runs only. Older 4D runs: the multidim branch has the 4D viewer.'; return; }
+  show(compact(m, id), 0); badge('connecting…'); connect();
+}
+function connect() {
+  const es = new EventSource(withKey(`api/runs/${encodeURIComponent(LIVE.run)}/feed?since=${LIVE.lastSeq + 1}`)); LIVE.es = es;
+  for (const t of ['start', 'harness', 'walk', 'edit', 'refused', 'end']) es.addEventListener(t, onEv);
+  es.onopen = () => badge(LIVE.ended ? 'ended' : 'live', !LIVE.ended);
+  es.onerror = () => { if (!LIVE.ended) badge('reconnecting…'); };
+}
+let renderPending = false;
+function render(jump) { if (jump) S.t = RUN.path.length - 1; if (renderPending) return; renderPending = true;
+  requestAnimationFrame(() => { renderPending = false; $('scrub').max = RUN.path.length - 1; movesList(); setT(S.t); }); }
+async function onEv(ev) {
+  let e; try { e = JSON.parse(ev.data); } catch { return; } if (e.seq <= LIVE.lastSeq) return; LIVE.lastSeq = e.seq;
+  if (e.t === 'start') { LIVE.t0 = e.t_wall; LIVE.maxMoves = (e.rulebook && e.rulebook.max_moves) || 200; RUN.meta.max_moves = LIVE.maxMoves; subline(); }
+  else if (e.t === 'harness') LIVE.said = e.reply || e.sent || '';
+  else if (e.t === 'walk') { const atEnd = S.t === RUN.path.length - 1;
+    RUN.path.push(e.to); RUN.times.push(Math.max(0, Math.round(e.t_wall - LIVE.t0))); RUN.said.push(String(LIVE.said).slice(0, 120)); LIVE.said = '';
+    render($('follow').checked && atEnd); }
+  else if (e.t === 'edit') { try { const m = await getJSON(`api/runs/${encodeURIComponent(LIVE.run)}/map`); RUN.meta.names = m.rooms.map(r => r.name); RUN.meta.exits = m.rooms.map(r => r.exits); M = buildMaze(RUN.meta); render(false); } catch {} }
+  else if (e.t === 'end') { LIVE.ended = e.result || 'ended'; badge('ended'); subline(); if (LIVE.es) LIVE.es.close(); }
+}
+})();
+</script>
+</body>
+</html>

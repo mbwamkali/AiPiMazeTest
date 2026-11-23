@@ -1,0 +1,21 @@
+# Runner settings for runner/house.py: runner/house.py --config ~/hypermaze/config/runner.toml
+# Copy to ~/hypermaze/config/runner.toml and uncomment what you need.
+# Precedence: command-line flag > environment variable > this file > built-in default.
+# Never put the run token in this file: only the path to a file that holds it.
+
+# The keeper's contestant URL ($HOUSE_SERVER and --server win over this).
+# server = "https://<keeper-host>:7341"
+
+# CA certificate that signed the keeper's TLS certificate ($SSL_CERT_FILE wins over this).
+# ca_cert = "~/hypermaze/ca.crt"
+
+# File whose first line is the run token ($HOUSE_TOKEN and --token win over this).
+# token_file = "~/hypermaze/run.token"
+
+# none, notes or notebook (--notes / --notebook win over this).
+# mode = "notes"
+
+# Notebook size and screen width.
+# pages = 100
+# lines = 35
+# width = 60

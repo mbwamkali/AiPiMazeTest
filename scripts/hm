@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""hm - install and run hypermaze components as systemd user services (stdlib only).
+
+  hm install <keeper|viewer|runner|ant>   clone or pull the repo into ~/hypermaze/app, copy the example
+                                          settings to ~/hypermaze/config/<component>.toml if missing
+                                          (never overwrites), write the systemd user unit(s)
+  hm start|stop|restart|status|logs <component>
+  hm update                               git pull, then restart every installed service
+  hm config                               print all settings files (key/token/secret-like values masked)
+  hm config edit <component>              open in $EDITOR, then check it parses and has what it needs
+
+Options: --dry-run (print what would be done, change nothing), --home DIR (instead of ~/hypermaze,
+also $HM_HOME), --repo URL (also $HM_REPO).
+
+Units: hypermaze-keeper.service, hypermaze-viewer.service, and for the ant hypermaze-llm.service
+(llama-server) plus hypermaze-ant.service (plays the run named by run_file/token_file once).
+The runner (runner/house.py) is a terminal game driven by play_llm.py or the ant, so it gets settings
+but no unit. For services to start at boot without a login: sudo loginctl enable-linger $USER
+"""
+import argparse
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+
+REPO_URL = "https://github.com/mbwamkali/AiPiMazeTest"
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, HERE)
+from hypermaze import config  # noqa: E402
+
+COMPONENTS = config.COMPONENTS
+SECRETISH = re.compile(r"key|token|secret|passw", re.I)
+# a long run of hex, or of token characters with letters and digits, that is not part of a path
+LONG_SECRET = re.compile(r"(?<![/\w.-])(?=[\w-]*\d)(?=[\w-]*[A-Za-z])[\w-]{32,}(?![/\w.-])")
+
+# component -> [(unit name, description, module args, restart policy, needs)]
+UNITS = {
+    "keeper": [("hypermaze-keeper", "hypermaze map keeper", ["-m", "arena", "serve"], "on-failure", None)],
+    "viewer": [("hypermaze-viewer", "hypermaze Colosseum viewer", ["-m", "arena.viewer"], "on-failure", None)],
+    "runner": [],
+    "ant": [("hypermaze-llm", "hypermaze ant llama-server", ["-m", "ant.llm_server"], "on-failure", None),
+            ("hypermaze-ant", "hypermaze ant (one run)", ["-m", "ant.pi_runner"], "no", "hypermaze-llm")],
+}
+
+
+class HM:
+    def __init__(self, home, repo, dry):
+        self.home, self.repo, self.dry = os.path.abspath(os.path.expanduser(home)), repo, dry
+        self.app = os.path.join(self.home, "app")
+        self.cfgdir = os.path.join(self.home, "config")
+        xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+        self.unitdir = os.path.join(xdg, "systemd", "user")
+
+    def run(self, cmd, check=True, **kw):
+        print("+ " + " ".join(shlex.quote(c) for c in cmd))
+        if self.dry:
+            return 0
+        return subprocess.run(cmd, check=check, **kw).returncode
+
+    def write(self, path, text, mode=0o644):
+        print(f"write {path}")
+        if self.dry:
+            print("    " + text.rstrip().replace("\n", "\n    "))
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+        os.chmod(path, mode)
+
+    def cfg_path(self, comp):
+        return os.path.join(self.cfgdir, f"{comp}.toml")
+
+    def example(self, comp):
+        for base in (self.app, HERE):
+            p = os.path.join(base, "config", f"{comp}.example.toml")
+            if os.path.exists(p):
+                return p
+        sys.exit(f"no example settings for {comp}")
+
+    def units(self, comp):
+        return [u[0] for u in UNITS[comp]]
+
+    def installed(self, comp):
+        return [u for u in self.units(comp) if os.path.exists(os.path.join(self.unitdir, u + ".service"))]
+
+    def unit_text(self, comp, name, desc, args, restart, needs):
+        exec_args = [sys.executable, *args, "--config", self.cfg_path(comp)]
+        need = f"Requires={needs}.service\nAfter={needs}.service network-online.target\n" if needs \
+            else "After=network-online.target\n"
+        wanted = "" if restart == "no" else "\n[Install]\nWantedBy=default.target\n"
+        return (f"[Unit]\nDescription={desc}\n{need}\n[Service]\nType=simple\n"
+                f"WorkingDirectory={self.app}\nEnvironment=PYTHONUNBUFFERED=1\n"
+                f"ExecStart={' '.join(shlex.quote(a) for a in exec_args)}\nRestart={restart}\n"
+                + ("RestartSec=5\n" if restart != "no" else "") + wanted)
+
+    # ---- commands ----
+    def install(self, comp):
+        if os.path.isdir(os.path.join(self.app, ".git")):
+            self.run(["git", "-C", self.app, "pull", "--ff-only"])
+        else:
+            self.run(["git", "clone", self.repo, self.app])
+        dst = self.cfg_path(comp)
+        if os.path.exists(dst):
+            print(f"keep {dst} (already there, not overwritten)")
+        else:
+            print(f"copy {self.example(comp)} -> {dst}")
+            if not self.dry:
+                os.makedirs(self.cfgdir, mode=0o700, exist_ok=True)
+                shutil.copyfile(self.example(comp), dst)
+                os.chmod(dst, 0o600)
+        if not UNITS[comp]:
+            print(f"{comp}: settings only, no service (it is started by play_llm.py or the ant)")
+            return 0
+        for name, desc, args, restart, needs in UNITS[comp]:
+            self.write(os.path.join(self.unitdir, name + ".service"),
+                       self.unit_text(comp, name, desc, args, restart, needs))
+        self.run(["systemctl", "--user", "daemon-reload"])
+        enable = [u[0] for u in UNITS[comp] if u[3] != "no"]
+        if enable:
+            self.run(["systemctl", "--user", "enable", *enable])
+        print(f"next: hm config edit {comp}   then   hm start {comp}")
+        return 0
+
+    def service(self, action, comp):
+        units = self.units(comp)
+        if not units:
+            sys.exit(f"{comp} has no service (it is started by play_llm.py or the ant)")
+        if action == "logs":
+            cmd = ["journalctl", "--user", "-n", "200", "--no-pager"]
+            for u in units:
+                cmd += ["-u", u]
+            return self.run(cmd, check=False)
+        if action == "status":
+            return self.run(["systemctl", "--user", "status", "--no-pager", *units], check=False)
+        if action == "stop":
+            units = list(reversed(units))
+        return self.run(["systemctl", "--user", action, *units], check=False)
+
+    def update(self):
+        self.run(["git", "-C", self.app, "pull", "--ff-only"])
+        for comp in COMPONENTS:
+            for u in self.installed(comp):
+                if u == "hypermaze-ant":
+                    continue  # one run at a time: not restarted behind your back
+                self.run(["systemctl", "--user", "try-restart", u], check=False)
+        return 0
+
+    def show(self):
+        for comp in COMPONENTS:
+            p = self.cfg_path(comp)
+            print(f"# ---- {comp}: {p}{'' if os.path.exists(p) else ' (missing)'}")
+            if not os.path.exists(p):
+                continue
+            with open(p) as f:
+                for line in f:
+                    print(mask(line.rstrip("\n")))
+        return 0
+
+    def edit(self, comp):
+        p = self.cfg_path(comp)
+        if not os.path.exists(p):
+            sys.exit(f"{p} is missing: run  hm install {comp}  first")
+        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "nano"
+        self.run([*shlex.split(editor), p], check=False)
+        return check_file(comp, p)
+
+
+def mask(line):
+    m = re.match(r"^(\s*#?\s*)([A-Za-z0-9_]+)(\s*=\s*)(.+)$", line)
+    if m and SECRETISH.search(m.group(2)):
+        return f"{m.group(1)}{m.group(2)}{m.group(3)}\"****\""
+    return LONG_SECRET.sub("****", line)
+
+
+def check_file(comp, path):
+    try:
+        cfg = config.load(comp, path)
+    except config.ConfigError as e:
+        print(f"NOT OK: {e}")
+        return 1
+    bad = 0
+    for k in config.missing(comp, cfg):
+        print(f"NOT OK: {path}: {k} must be set")
+        bad = 1
+    for k, v in cfg.items():
+        if k in config.PATH_KEYS and k not in ("data", "llama_server") and not os.path.exists(v):
+            print(f"warning: {k} = {v!r} does not exist (yet)")
+    if not bad:
+        print(f"OK: {path} ({len(cfg)} settings)")
+    return bad
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="hm", description=__doc__.split("\n")[0],
+                                 epilog=__doc__.split("\n", 2)[2], formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--dry-run", action="store_true", help="print what would be done, change nothing")
+    ap.add_argument("--home", default=os.environ.get("HM_HOME", "~/hypermaze"), help="default ~/hypermaze")
+    ap.add_argument("--repo", default=os.environ.get("HM_REPO", REPO_URL))
+    ap.add_argument("command", choices=["install", "start", "stop", "restart", "status", "logs", "update", "config"])
+    ap.add_argument("args", nargs="*")
+    a = ap.parse_args(argv)
+    hm = HM(a.home, a.repo, a.dry_run)
+    need = lambda: a.args[0] if a.args and a.args[0] in COMPONENTS else ap.error(
+        f"{a.command} needs a component: {', '.join(COMPONENTS)}")
+    if a.command == "install":
+        return hm.install(need())
+    if a.command in ("start", "stop", "restart", "status", "logs"):
+        return hm.service(a.command, need())
+    if a.command == "update":
+        return hm.update()
+    if not a.args:
+        return hm.show()
+    if a.args[0] == "edit" and len(a.args) == 2 and a.args[1] in COMPONENTS:
+        return hm.edit(a.args[1])
+    if a.args[0] == "check" and len(a.args) == 2 and a.args[1] in COMPONENTS:
+        return check_file(a.args[1], hm.cfg_path(a.args[1]))
+    ap.error("use: hm config | hm config edit <component> | hm config check <component>")
+
+
+if __name__ == "__main__":
+    sys.exit(main())
