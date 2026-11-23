@@ -227,6 +227,9 @@ All units run with `UMask=0077`, so files they create (run logs, keys) are priva
 until the next run. A run started within those minutes reuses the warm model. While the model is
 loading, or if `/slots` can't be read, it counts as busy as long as `hypermaze-ant.service` is active.
 `hm update` restarts neither the ant nor the model.
+If something else already listens on `llm_port` (for example an old hand-started llama-server), the
+model service logs "port … is already in use" and stops without restarting (exit status 3), and the
+ant run refuses to start (its unit checks first that the model service's own llama-server is up).
 
 `--home DIR` (or `$HM_HOME`) uses another folder than `~/hypermaze`; `--repo URL` (or `$HM_REPO`)
 another repository. User services only run while you are logged in unless lingering is on:

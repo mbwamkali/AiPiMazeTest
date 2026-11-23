@@ -338,7 +338,8 @@ class TestIdleDecision(unittest.TestCase):
         port = free_port()
         cfg = write(os.path.join(home, "ant.toml"), f'model = "{home}/m.gguf"\nllama_server = "{fake}"\n'
                     f'llm_port = {port}\nidle_minutes = 5\n')
-        env = clean_env(home, PATH=os.path.join(home, "nobin"))  # no systemctl: unknown counts as busy
+        env = clean_env(home, PATH=os.path.join(home, "nobin"),  # no systemctl: unknown counts as busy
+                        XDG_RUNTIME_DIR=os.path.join(home, "run"))
         args = [sys.executable, "-m", "ant.llm_server", "--config", cfg, "--poll", "0.2", "--idle-seconds", "1.5"]
 
         write(os.path.join(home, "state"), "busy")
@@ -347,16 +348,49 @@ class TestIdleDecision(unittest.TestCase):
             self.assertTrue(wait_port(port))
             time.sleep(3)
             self.assertIsNone(p.poll(), "a busy server must keep running")
+            pidf = os.path.join(home, "run", "hypermaze-llm.pid")
+            self.assertTrue(os.path.exists(pidf))
             write(os.path.join(home, "state"), "idle")
             code = p.wait(timeout=15)
             self.assertEqual(code, 0)                    # clean exit: Restart=on-failure leaves it down
             self.assertIn("idle", p.stderr.read())
             self.assertFalse(wait_port(port, timeout=1))  # llama-server went with it
+            self.assertFalse(os.path.exists(pidf))         # and the pid file
         finally:
             if p.poll() is None:
                 stop(p)
             else:
                 p.stdout.close(); p.stderr.close()
+
+    def test_check_ours(self):
+        L = self.L
+        d = tempfile.mkdtemp()
+        pid = os.path.join(d, "llm.pid")
+        nosleep = lambda s: None
+        ok, msg = L.check_ours(0, state=lambda: "failed", pidpath=pid, sleep=nosleep)
+        self.assertFalse(ok)
+        self.assertIn("failed", msg)
+        ok, msg = L.check_ours(0, state=lambda: "active", pidpath=pid, sleep=nosleep)   # no pid file
+        self.assertFalse(ok)
+        write(pid, "999999999")                                                       # a dead pid
+        self.assertFalse(L.check_ours(0, state=lambda: "active", pidpath=pid, sleep=nosleep)[0])
+        write(pid, str(os.getpid()))                                                  # alive
+        self.assertTrue(L.check_ours(0, state=lambda: "active", pidpath=pid, sleep=nosleep)[0])
+        self.assertTrue(L.check_ours(0, state=lambda: None, pidpath=pid, sleep=nosleep)[0])
+
+    @unittest.skipUnless(HAVE_TOML, "settings files need Python 3.11+")
+    def test_port_already_taken(self):
+        home = tempfile.mkdtemp()
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            s.listen()
+            port = s.getsockname()[1]
+            cfg = write(os.path.join(home, "ant.toml"), f'model = "/m.gguf"\nllama_server = "{sys.executable}"\n'
+                        f'llm_port = {port}\n')
+            r = subprocess.run([sys.executable, "-m", "ant.llm_server", "--config", cfg], cwd=ROOT,
+                               env=clean_env(home), capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("already in use", r.stderr)
 
     @unittest.skipUnless(HAVE_TOML, "settings files need Python 3.11+")
     def test_dry_run_shows_idle_setting(self):
@@ -437,7 +471,10 @@ class TestHm(unittest.TestCase):
             ant = f.read()
         self.assertNotIn("[Install]", llm)                 # not started at boot
         self.assertIn("Restart=on-failure", llm)           # a clean idle exit stays down
+        self.assertIn("RestartPreventExitStatus=3", llm)   # port already taken: no restart loop
         self.assertIn("Wants=hypermaze-llm.service", ant)
+        self.assertIn("-m ant.llm_server --config", ant)
+        self.assertIn("--check-ours", ant)
         self.assertNotIn("Requires=", ant)
         self.assertTrue(all("UMask=0077" in t for t in (llm, ant)))
         with open(self.calls) as f:
