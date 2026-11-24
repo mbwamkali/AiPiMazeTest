@@ -6,6 +6,7 @@ Contestant port (open to the runner's machine):
   GET  /v1/device/notebook[?page=N]   the notebook page as text (the open page by default)
   POST /v1/device/notebook {"line": "<command>"}   one line into the notebook -> reply and open page
   POST /v1/wall   {"text": "<line>"}  write one line on this room's walls (costs a turn) -> reply and the room
+  POST /v1/say    {"text": "<line>"}  say a line; only teammates in the same room hear it (free) -> reply and the room
 Admin port (signed requests only; firewalled from the runner's machine):
   POST /admin/runs                    start a run -> run_id, token
   GET  /admin/runs                    list runs
@@ -19,6 +20,7 @@ Admin port (signed requests only; firewalled from the runner's machine):
   POST /admin/matches                 {"size", "loops", "seed", "max_moves", "generator", "ants": [names]}
                                       one run per ant on the same maze, each waiting for that ant's agent
   GET  /admin/agents                  ants' agents heard from, and the runs waiting for them (no tokens)
+  GET  /admin/teams/<match>           a team match's score: every ant's moves, and the total once all are out
 Harness port (signed with the harness key; open to the harness on the runner's machine):
   POST /runs/<id>/turn                one turn of the LLM harness: what it was shown and what it sent
   POST /agents/<name>/next {"busy": b}  an ant's agent asks for work -> {"run_id", "token"} or {"run_id": null}
@@ -51,7 +53,11 @@ class Keeper:
         self.verifier = auth.Verifier()
         self.access_log = access_log
         self.log_lock = threading.Lock()
-        self.dispatch = Dispatch(stop_run=self._missed)
+        self.dispatch = Dispatch(stop_run=self._missed, ended=self._ended)
+
+    def _ended(self, run_id):
+        run = self.store.runs.get(run_id)
+        return run is None or run.ended is not None
 
     def _missed(self, run_id):
         run = self.store.runs.get(run_id)
@@ -62,15 +68,19 @@ class Keeper:
         req = check_request(data)
         match_id = Dispatch.new_match_id()
         seed, made = req["seed"], []
-        rb = {"generator": req["generator"], "max_moves": req["max_moves"]}
-        for ant in req["ants"]:
-            run, token = self.store.create(2, req["size"], req["loops"], seed, rb, {"match": match_id, "agent": ant})
+        rb = {"generator": req["generator"], "max_moves": req["max_moves"], "team": req["team"]}
+        for seat, ant in enumerate(req["ants"]):
+            run, token = self.store.create(2, req["size"], req["loops"], seed, rb,
+                                           {"match": match_id, "agent": ant, "seat": seat})
             seed = run.settings["seed"]
             made.append((ant, run, token))
+        prev = None
         for ant, run, token in made:
-            self.dispatch.add(ant, run.id, token, match_id)
+            self.dispatch.add(ant, run.id, token, match_id, after=prev if req["team"] == "relay" else None)
+            prev = run.id
         self.note(f"match {match_id}: {len(made)} run(s), size {req['size']} loops {req['loops']} seed {seed}")
-        return {"match": match_id, "seed": seed, "runs": [{"run_id": r.id, "agent": a} for a, r, _ in made]}
+        return {"match": match_id, "seed": seed, "team": req["team"],
+                "runs": [{"run_id": r.id, "agent": a} for a, r, _ in made]}
 
     def note(self, line):
         if self.access_log:
@@ -141,7 +151,7 @@ class ContestantHandler(_Base):
         dev = DEVICE_PATH.match(self.path)
         if dev and dev.group(2):
             dev = None
-        known = self.path in ("/v1/walk", "/v1/wall") or bool(dev)
+        known = self.path in ("/v1/walk", "/v1/wall", "/v1/say") or bool(dev)
         run = self._run() if known else None
         if not run:
             return self._404("contestant" if known else "path")
@@ -153,6 +163,14 @@ class ContestantHandler(_Base):
             except (ValueError, KeyError, TypeError):
                 return self._send(400, {"error": "bad_request"})
             return self._send(200, run.device_input(dev.group(1), line))
+        if self.path == "/v1/say":
+            try:
+                text = json.loads(body or b"{}")["text"]
+                if not isinstance(text, str) or len(text) > 1000:
+                    raise TypeError
+            except (ValueError, KeyError, TypeError):
+                return self._send(400, {"error": "bad_request"})
+            return self._send(200, run.say(text))
         if self.path == "/v1/wall":
             try:
                 text = json.loads(body or b"{}")["text"]
@@ -200,6 +218,9 @@ class AdminHandler(_Base):
             return self._404("admin auth")
         if path == "/admin/agents":
             return self._send(200, self.keeper.dispatch.view())
+        if path.startswith("/admin/teams/"):
+            team = self.keeper.store.teams.get(path[len("/admin/teams/"):])
+            return self._send(200, team.score()) if team else self._404("path")
         run, sub = self._route(path)
         if run is False:
             return self._404("path")

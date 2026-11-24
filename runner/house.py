@@ -10,7 +10,8 @@ Usage: house.py [--server URL] [--notebook]
   --token T      your key to the house (default: $HOUSE_TOKEN, else token_file in the settings)
   --config FILE  settings file (default: $HOUSE_CONFIG if set)
 Commands: <room name>, look, quit, and with --notebook: read, read page <n>, next, back,
-write <text>, erase <line>, tab <label>, tabs, and write on wall <text>.
+write <text>, erase <line>, tab <label>, tabs, and write on wall <text>. say <text> speaks to anyone
+standing in the room with you.
 """
 import json
 import os
@@ -84,6 +85,10 @@ class House:
         """One line into the notebook; returns the notebook's reply."""
         return self._call("POST", "/v1/device/notebook", {"line": line}).get("reply", "")
 
+    def say(self, text):
+        """Say one line to anyone in this room; returns the reply and the room."""
+        return self._call("POST", "/v1/say", {"text": text})
+
     def wall(self, text):
         """Write one line on the walls of this room; returns the reply and the room."""
         return self._call("POST", "/v1/wall", {"text": text})
@@ -111,6 +116,8 @@ class Game:
             o.append((", " if i else " ") + x)
         if self.view.get("walls"):
             o.append("\nThe walls are " + self.view["walls"].replace("_", " ") + ".")
+        if self.view.get("here"):
+            o.append("\nAlso here: " + ", ".join(self.view["here"]) + ".")
         marks = self.view.get("marks") or []
         if marks:
             o.append("\nWritten on the walls:")
@@ -129,7 +136,7 @@ class Game:
             o.append(" Apart from your clothes, all\n"
                      "you have is a small backpack, and in it a notebook and a pen. What you do with them is yours.")
         o.append("\nSomewhere in this house is the Way Out. Type the name of a path to walk to that room.\n"
-                 "Commands: look, quit")
+                 "Commands: look, quit, say <text> (heard only by anyone in the room with you)")
         if self.notebook:
             o.append(".\nThe notebook has a fixed number of pages, and in this fog you can only make out one page at a time.\n"
                      "Notebook commands (none of them cost a move): read, read page <n>, next, back,\n"
@@ -169,6 +176,13 @@ class Game:
         if in_ == "look" or not in_:
             self._refresh()
             return self._ending() or self.show()
+        if in_.startswith("say "):
+            v = self.house.say(raw[4:].strip())
+            if v.get("error"):
+                self._refresh()
+                return self._ending() or self.show()
+            self.view = v
+            return self._ending() or ("\n" + str(v.get("reply", "")) + self.show())
         wall = next((w for w in WALL_WORDS if in_.startswith(w)), None) if self.notebook else None
         if wall:
             said = raw[len(wall):].strip()
