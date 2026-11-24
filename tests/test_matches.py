@@ -23,7 +23,7 @@ from arena.dispatch import Dispatch, MatchError, check_request, EXPIRE  # noqa: 
 from ant import agent  # noqa: E402
 from test_arena import Keeper  # noqa: E402
 
-MATCH = {"size": 5, "loops": 0.1, "seed": 42, "max_moves": 50, "generator": "dfs", "ants": ["mbclock", "pi-two"]}
+MATCH = {"size": 5, "loops": 0.1, "seed": 42, "max_moves": 50, "generator": "dfs", "ants": ["pi-one", "pi-two"]}
 
 
 class TestDispatch(unittest.TestCase):
@@ -31,7 +31,7 @@ class TestDispatch(unittest.TestCase):
         r = check_request(dict(MATCH, seed=""))
         self.assertIsNone(r["seed"])
         for bad in ({"size": 1}, {"size": 61}, {"loops": 0.9}, {"max_moves": -1}, {"ants": []},
-                    {"ants": ["Bad Name"]}, {"ants": "mbclock"}, {"size": "x"}, {"seed": -1}, {"size": True}):
+                    {"ants": ["Bad Name"]}, {"ants": "pi-one"}, {"size": "x"}, {"seed": -1}, {"size": True}):
             with self.assertRaises(MatchError, msg=bad):
                 check_request(dict(MATCH, **bad))
         self.assertEqual(check_request(dict(MATCH, ants=["a", "a"]))["ants"], ["a"])
@@ -40,11 +40,11 @@ class TestDispatch(unittest.TestCase):
         now = [1000.0]
         stopped = []
         d = Dispatch(stop_run=stopped.append, clock=lambda: now[0])
-        d.add("mbclock", "r1", "t" * 20, "m1")
+        d.add("pi-one", "r1", "t" * 20, "m1")
         d.add("pi-two", "r2", "u" * 20, "m1")
-        self.assertEqual(d.take("mbclock", busy=True), {"run_id": None})     # busy: nothing
-        self.assertEqual(d.take("mbclock", busy=False), {"run_id": "r1", "token": "t" * 20})
-        self.assertEqual(d.take("mbclock", busy=False), {"run_id": None})    # handed over once
+        self.assertEqual(d.take("pi-one", busy=True), {"run_id": None})     # busy: nothing
+        self.assertEqual(d.take("pi-one", busy=False), {"run_id": "r1", "token": "t" * 20})
+        self.assertEqual(d.take("pi-one", busy=False), {"run_id": None})    # handed over once
         v = d.view()
         self.assertNotIn("token", json.dumps(v))
         self.assertEqual({q["run_id"]: q["status"] for q in v["queue"]}, {"r1": "claimed", "r2": "waiting"})
@@ -69,16 +69,16 @@ class TestKeeperMatches(unittest.TestCase):
     def test_match_to_ant(self):
         st, made = self.k.admin("POST", "/admin/matches", MATCH)
         self.assertEqual(st, 200, made)
-        self.assertEqual([r["agent"] for r in made["runs"]], ["mbclock", "pi-two"])
+        self.assertEqual([r["agent"] for r in made["runs"]], ["pi-one", "pi-two"])
         self.assertNotIn("token", json.dumps(made))
         runs = self.k.k.store.runs
         r0, r1 = (runs[r["run_id"]] for r in made["runs"])
         self.assertEqual(r0.settings["seed"], 42)
         self.assertEqual((r0.settings["size"], r0.settings["dims"], r0.rulebook["max_moves"]), (5, 2, 50))
         self.assertEqual(r0.world.to_dict()["rooms"], r1.world.to_dict()["rooms"])      # same maze
-        self.assertEqual((r0.settings["match"], r0.settings["agent"]), (made["match"], "mbclock"))
+        self.assertEqual((r0.settings["match"], r0.settings["agent"]), (made["match"], "pi-one"))
         # the agent gets the run id and token, nothing else
-        st, got = self.take("mbclock")
+        st, got = self.take("pi-one")
         self.assertEqual(st, 200)
         self.assertEqual(set(got), {"run_id", "token"})
         self.assertEqual(got["run_id"], made["runs"][0]["run_id"])
@@ -86,11 +86,11 @@ class TestKeeperMatches(unittest.TestCase):
         st, room = self.k.room(got["token"])
         self.assertEqual(st, 200)
         self.assertNotIn("match", json.dumps(room))
-        self.assertNotIn("mbclock", json.dumps(room))
-        self.assertEqual(self.take("mbclock")[1], {"run_id": None})
+        self.assertNotIn("pi-one", json.dumps(room))
+        self.assertEqual(self.take("pi-one")[1], {"run_id": None})
         st, v = self.k.admin("GET", "/admin/agents")
         self.assertEqual(st, 200)
-        self.assertEqual([a["name"] for a in v["agents"]], ["mbclock"])
+        self.assertEqual([a["name"] for a in v["agents"]], ["pi-one"])
         self.assertNotIn(got["token"], json.dumps(v))
 
     def test_random_seed_shared(self):
@@ -104,9 +104,9 @@ class TestKeeperMatches(unittest.TestCase):
         self.assertEqual(self.k.admin("POST", "/admin/matches", dict(MATCH, generator="nope"))[0], 400)
         # only the admin key makes matches; only the harness key asks for work; the contestant port knows neither
         self.assertEqual(self.k.admin("POST", "/admin/matches", MATCH, role="harness")[0], 404)
-        self.assertEqual(self.k.admin("POST", "/agents/mbclock/next", {"busy": False}, role="admin",
+        self.assertEqual(self.k.admin("POST", "/agents/pi-one/next", {"busy": False}, role="admin",
                                       port=self.k.hport)[0], 404)
-        self.assertEqual(self.k.admin("POST", "/agents/mbclock/next", {}, port=self.k.cport)[0], 404)
+        self.assertEqual(self.k.admin("POST", "/agents/pi-one/next", {}, port=self.k.cport)[0], 404)
         self.assertEqual(self.k.admin("GET", "/admin/agents", role="harness")[0], 404)
         self.assertEqual(self.take("Not_OK")[0], 404)
 
@@ -124,14 +124,14 @@ class TestAgent(unittest.TestCase):
 
     def once(self, busy=False):
         started = []
-        rid = agent.once(self.url, self.key, "mbclock", os.path.join(self.dir, "run.id"),
+        rid = agent.once(self.url, self.key, "pi-one", os.path.join(self.dir, "run.id"),
                          os.path.join(self.dir, "run.token"), is_busy=lambda: busy,
                          do_start=lambda: started.append(1) or True, log=lambda s: None)
         return rid, started
 
     def test_pick_up_and_start(self):
         self.assertEqual(self.once(), (None, []))                 # nothing waiting
-        st, made = self.k.admin("POST", "/admin/matches", dict(MATCH, ants=["mbclock"]))
+        st, made = self.k.admin("POST", "/admin/matches", dict(MATCH, ants=["pi-one"]))
         self.assertEqual(self.once(busy=True), (None, []))        # busy: left waiting
         rid, started = self.once()
         self.assertEqual((rid, started), (made["runs"][0]["run_id"], [1]))
@@ -192,7 +192,7 @@ class TestViewerNewMatch(unittest.TestCase):
         self.assertEqual([q["status"] for q in v["queue"]], ["waiting", "waiting"])
         self.assertNotIn("token", json.dumps(v))
         st, runs = self.call(p, "/api/runs?key=vk")
-        self.assertEqual({r["settings"]["agent"] for r in runs["runs"]}, {"mbclock", "pi-two"})
+        self.assertEqual({r["settings"]["agent"] for r in runs["runs"]}, {"pi-one", "pi-two"})
 
 
 def load_hm():

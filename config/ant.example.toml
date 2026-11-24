@@ -41,6 +41,6 @@
 
 # --- the agent (hypermaze-ant-agent: asks the report URL for the next game and starts it) ---
 # Name this machine goes by (default: its host name).
-# agent_name = "mbclock"
+# agent_name = "pi-one"
 # Seconds between asks.
 # poll_seconds = 5
