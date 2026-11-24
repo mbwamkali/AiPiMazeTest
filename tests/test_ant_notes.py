@@ -73,7 +73,7 @@ class TestAntNotes(unittest.TestCase):
     def test_many_pages(self):
         run, notes = self.play(4, 2, 12, 0.3, 400)
         self.assertGreater(notes.page, 3)             # the ant turned pages as they filled
-        self.assertEqual(run.moves, sum(r.startswith("MOVE: ") for r in notes.records()))
+        self.assertEqual(run.moves, sum(r.startswith("> ") for r in notes.records()))
 
     def test_only_the_notebook_is_memory(self):
         """Wipe the notebook and the ant has forgotten everything: no hidden memory elsewhere."""
@@ -91,6 +91,83 @@ class TestAntNotes(unittest.TestCase):
         self.assertEqual(notes.records(), [])
         self.assertIn("Other visited rooms with untried paths: 0", notes.screen(view))
         self.assertNotIn("first came", notes.screen(view))
+
+
+class TestWornPen(unittest.TestCase):
+    """A failing pen: the ant reads what is there and never makes up a door that isn't real."""
+
+    def walk_with(self, rulebook, steps=300, seed=21):
+        store = Store(tempfile.mkdtemp())
+        run, _ = store.create(2, 8, 0.2, seed, rulebook)
+        house = LocalHouse(run)
+        notes = AntNotes(house)
+        view = house.room()
+        notes.room(view["room"], view["doors"])
+        rng = random.Random(seed)
+        for _ in range(steps):
+            if view.get("ended"):
+                break
+            C.parse_screen(notes.screen(view))          # always a screen the model can read
+            frm = view["room"]
+            view = house.walk(rng.choice(view["doors"]))
+            notes.move(frm, view["room"])
+            if not view.get("ended"):
+                notes.room(view["room"], view["doors"])
+        return run, notes
+
+    def check_real(self, run, st):
+        names = {n: i for i, n in enumerate(run.world.names)}
+        for a, bs in st["tried"].items():
+            for b in bs:
+                self.assertIn(names[b], run.world.adj[names[a]], f"{a} -> {b}")
+        for r, ds in st["doors"].items():
+            self.assertLessEqual({names[d] for d in ds}, set(run.world.adj[names[r]]), r)
+
+    def test_worn_tip_drops_letters_but_notes_stay_true(self):
+        run, notes = self.walk_with({"wear": {"paper": 0.0015}})
+        text = "\n".join(notes.records())
+        self.assertIn("_", text)                         # the tip did wear out
+        st = notes.state()
+        self.assertTrue(st["tried"])
+        self.check_real(run, st)
+
+    def test_faint_then_dry(self):
+        run, notes = self.walk_with({"pen_ink": 4000})
+        pages = "\n".join(notes.house.read(p) for p in range(1, notes.page + 1))
+        self.assertIn("(faint) ", pages)
+        self.assertEqual(run.pen.ink < 40, True)
+        st = notes.state()
+        self.assertFalse(any(k.startswith("(") for k in st["visits"]))   # the faint mark is not a room name
+        self.check_real(run, st)
+
+    def test_reads_old_move_lines(self):
+        store = Store(tempfile.mkdtemp())
+        run, _ = store.create(2, 6, 0.0, 9)
+        house = LocalHouse(run)
+        house.write("write ROOM: Coral Tower | doors: Iron Den; Jade Foyer")
+        house.write("write MOVE: Coral Tower -> Iron Den")
+        house.write("write ROOM: Iron Den | doors: Coral Tower")
+        st = AntNotes(house).state()
+        self.assertEqual(st["came"], {"Iron Den": "Coral Tower"})
+        self.assertEqual(st["tried"]["Coral Tower"], {"Iron Den"})
+
+    def test_lost_letters_resolve_only_when_unambiguous(self):
+        store = Store(tempfile.mkdtemp())
+        run, _ = store.create(2, 6, 0.0, 9)
+        house = LocalHouse(run)
+        house.write("write ROOM: Coral Tower | doors: Iron Den; Iron Dun; Jade Foyer")
+        house.write("write > Jade F_yer")
+        house.write("write ROOM: Jade Foyer | doors: Coral Tower")
+        house.write("write > C_ral Tower")
+        house.write("write > Iron D_n")                  # Den or Dun: can't tell, so it's lost
+        st = AntNotes(house).state()
+        self.assertEqual(st["tried"]["Coral Tower"], {"Jade Foyer"})
+        self.assertEqual(st["came"], {"Jade Foyer": "Coral Tower"})
+
+    def test_short_move_lines_save_ink(self):
+        old = len("MOVE: Whispering Workshop -> Sunken Garden")
+        new = len("> Sunken Garden")
+        self.assertLess(new, old / 2)
 
 
 if __name__ == "__main__":
