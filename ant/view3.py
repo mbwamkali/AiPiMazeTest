@@ -104,8 +104,18 @@ def view(room, doors, untried, came, open_, last, walls="wood", marks=(), here=(
     return "\n".join(lines), options
 
 
+PROMPT_NAMES = {"NoMoe": "Mooore"}     # v3 is trained with the bossy ant's new name
+
+
+def system_prompt(persona):
+    text = P.SYSTEM[persona]
+    for old, new in PROMPT_NAMES.items():
+        text = text.replace(old, new)
+    return text
+
+
 def messages(persona, text, quiet):
-    return [{"role": "system", "content": P.SYSTEM[persona] + (QUIET3 if quiet else TALK3)},
+    return [{"role": "system", "content": system_prompt(persona) + (QUIET3 if quiet else TALK3)},
             {"role": "user", "content": text}]
 
 
