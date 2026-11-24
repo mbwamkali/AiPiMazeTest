@@ -9,6 +9,7 @@ how it actually comes out:
   skipped      a worn tip drops letters: "de_d end -> Ir_n D_n"
   smeared      a damp wall loses letters the same way
   nothing      the surface doesn't take ink (ice, glass, metal, tile), or the pen is dry or broken
+               (a pen that runs dry mid-line leaves the rest as "_": you can see where letters were)
 
 The player is told none of this: the keeper says the same thing after every write, and the player
 only ever sees the writing as it came out. Ink, tip and surface effects are logged for the Colosseum.
@@ -80,7 +81,8 @@ class Pen:
                 out.append(ch)
                 continue
             if self.ink < per_letter or self.tip <= 0.0:
-                break                # dry or broken: the rest of the line never appears
+                out.append(LOST)     # dry or broken: only the groove of the letter, no ink
+                continue
             self.ink -= per_letter
             self.tip = max(0.0, self.tip - wear)
             lost = False

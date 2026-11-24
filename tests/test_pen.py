@@ -64,7 +64,7 @@ class TestPen(unittest.TestCase):
         p.ink = 5                                    # 0.5%
         self.assertEqual(p.render("abc", PAPER, 6)[0], "(very faint) abc")
         p.ink = 1                                    # runs dry mid-line
-        self.assertEqual(p.render("abc", PAPER, 6)[0], "(very faint) a")
+        self.assertEqual(p.render("abc", PAPER, 6)[0], "(very faint) a__")
         self.assertEqual(p.render("abc", PAPER, 6)[0], "")
 
     def test_same_seed_same_result(self):
