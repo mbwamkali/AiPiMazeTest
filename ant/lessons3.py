@@ -1,5 +1,6 @@
 """v3 lessons: relay games played by the lesson bot (ant/relay3.py), one lesson per move it makes.
 
+Mazes: 2D, sizes 6 to 24 (project scope; --shapes mix gives v2's 2D-5D mix).
 Mix: 1 to 3 ants (a lone ant keeps the old skill; later ants learn to follow "out" notes; the first of
 several learns to go back and mark the way), wall materials from all wood to hard, a few small pens,
 2D to 5D mazes. Now and then the bot takes a random wrong turn that is not taught, so the screens after
@@ -37,9 +38,15 @@ def comment(persona, kind, to, rng):
     return rng.choice(lines).format(to=to) if lines else None
 
 
-def games(n, seed_base, rng, briefing="team"):
+def maze_2d(rng):
+    """Project scope is 2D: sizes 6-24, mostly 12-20, some loops, all three generators."""
+    size = rng.choice([6, 8, 10] + [12, 14, 16, 18, 20] * 3 + [22, 24])
+    return 2, size, rng.choice([0.0, 0.0, 0.1, 0.2, 0.25, 0.3]), rng.choice(["dfs", "dfs", "wilson", "prim"])
+
+
+def games(n, seed_base, rng, briefing="team", shapes="2d"):
     for i in range(n):
-        dims, size, loops, gen = maze_mix(rng)
+        dims, size, loops, gen = maze_2d(rng) if shapes == "2d" else maze_mix(rng)
         maze = Maze(dims, size, loops, seed=seed_base + i, generator=gen)
         ants = rng.choice([1, 1, 2, 2, 3, 3, 3])
         mix = rng.choices([m for m, _ in MIXES], [w for _, w in MIXES])[0]
@@ -55,6 +62,10 @@ def main(argv=None):
     ap.add_argument("--quiet-share", type=float, default=0.25)
     ap.add_argument("--wrong", type=float, default=0.04)
     ap.add_argument("--chatty", type=float, default=0.08)
+    ap.add_argument("--keep", type=float, default=1.0,
+                    help="keep this share of the lessons (more mazes for the same number of lessons)")
+    ap.add_argument("--shapes", choices=["2d", "mix"], default="2d",
+                    help="2d: 2D mazes 6-24 (project scope); mix: v2's 2D-5D mix")
     ap.add_argument("--briefing", choices=["team", "size", "none"], default="team",
                     help="what an ant is told about its team as it comes in (see ant/relay3.py)")
     a = ap.parse_args(argv)
@@ -62,7 +73,7 @@ def main(argv=None):
     n = talk = 0
     kinds = {}
     with open(a.out, "w") as f:
-        for g in games(a.games, a.seed_base, rng, a.briefing):
+        for g in games(a.games, a.seed_base, rng, a.briefing, a.shapes):
             while not g.done:
                 text, options = g.screen()
                 doors = [v for k, v in options.items() if v[0] == "go"]
@@ -76,12 +87,13 @@ def main(argv=None):
                 say = None
                 if not quiet and (kind in INTERESTING or rng.random() < a.chatty):
                     say = comment(persona, kind, to, rng)
-                msgs = V.messages(persona, text, quiet)
-                msgs.append({"role": "assistant", "content": V.answer(key, say)})
-                f.write(json.dumps({"messages": msgs}) + "\n")
-                n += 1
-                talk += say is not None
-                kinds[kind] = kinds.get(kind, 0) + 1
+                if rng.random() < a.keep:
+                    msgs = V.messages(persona, text, quiet)
+                    msgs.append({"role": "assistant", "content": V.answer(key, say)})
+                    f.write(json.dumps({"messages": msgs}) + "\n")
+                    n += 1
+                    talk += say is not None
+                    kinds[kind] = kinds.get(kind, 0) + 1
                 g.apply(options[key])
     print(f"{n} lessons ({talk} with a comment) -> {a.out}")
     print(" ", dict(sorted(kinds.items(), key=lambda kv: -kv[1])))

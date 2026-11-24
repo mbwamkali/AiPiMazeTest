@@ -14,7 +14,7 @@ import time
 from hypermaze.core import Maze
 from . import view3 as V
 from .lessons import maze_mix
-from .lessons3 import MIXES
+from .lessons3 import MIXES, maze_2d
 from .relay3 import RelayGame
 
 HELDOUT_BASE = 950000
@@ -23,11 +23,11 @@ HELDOUT_BASE = 950000
 WALLS = {"wood": {}, "mixed": MIXES[1][0], "hard": MIXES[2][0]}
 
 
-def heldout(n, size=None, walls=None):
+def heldout(n, size=None, walls=None, shapes="2d"):
     rng = random.Random(HELDOUT_BASE)
     out = []
     for i in range(n):
-        dims, sz, loops, gen = (2, size, 0.25, "dfs") if size else maze_mix(rng)
+        dims, sz, loops, gen = (2, size, 0.25, "dfs") if size else maze_2d(rng) if shapes == "2d" else maze_mix(rng)
         ants = [1, 2, 3][i % 3]
         mix = WALLS[walls] if walls else MIXES[i % len(MIXES)][0]
         out.append((Maze(dims, sz, loops, seed=HELDOUT_BASE + i, generator=gen), ants, mix, HELDOUT_BASE + i))
@@ -123,10 +123,11 @@ def main(argv=None):
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--json")
+    ap.add_argument("--shapes", choices=["2d", "mix"], default="2d", help="maze shapes when --size is not given")
     ap.add_argument("--walls", choices=sorted(WALLS), help="all games with these walls (default: the lesson mix)")
     ap.add_argument("--briefing", choices=["team", "size", "none"], default="team")
     a = ap.parse_args(argv)
-    games = [Game(s, a.quiet, a.briefing) for s in heldout(a.games, a.size, a.walls)]
+    games = [Game(s, a.quiet, a.briefing) for s in heldout(a.games, a.size, a.walls, a.shapes)]
     t0 = time.time()
     if a.backend == "hf":
         run_hf(games, a.model, a.batch, a.max_new, a.temperature)
