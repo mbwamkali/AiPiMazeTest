@@ -32,9 +32,9 @@ def heldout(n, size=None):
 
 
 class Game:
-    def __init__(self, spec, quiet):
+    def __init__(self, spec, quiet, briefing="team"):
         maze, ants, mix, seed = spec
-        self.g = RelayGame(maze, ants=ants, mix=mix, seed=seed)
+        self.g = RelayGame(maze, ants=ants, mix=mix, seed=seed, briefing=briefing)
         self.quiet = quiet
         self.noparse = self.steps = self.agree = 0
         self.options = None
@@ -114,8 +114,9 @@ def main(argv=None):
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--json")
+    ap.add_argument("--briefing", choices=["team", "size", "none"], default="team")
     a = ap.parse_args(argv)
-    games = [Game(s, a.quiet) for s in heldout(a.games, a.size)]
+    games = [Game(s, a.quiet, a.briefing) for s in heldout(a.games, a.size)]
     t0 = time.time()
     if a.backend == "hf":
         run_hf(games, a.model, a.batch, a.max_new, a.temperature)

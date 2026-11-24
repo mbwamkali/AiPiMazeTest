@@ -54,6 +54,7 @@ class Player:
         self.route = None         # start ... Way Out, once it has been there
         self.trailing = False     # going back to mark the way
         self.marked = False       # it has already marked the way
+        self.wrote = set()        # rooms where it already tried to write its trail note
         self.following = False
         self.prev = None
         self.last = None          # for the "Last action" line
@@ -109,6 +110,7 @@ class Player:
 class RelayGame:
     def __init__(self, maze, ants=1, mix=None, seed=0, pen_ink=200000, wear=None, cap_factor=8, briefing="team"):
         """briefing: "team"  each ant is told once, as it comes in, how many come after it, and writes it on page 1
+                     "size"  told once only the team's size ("you are one of 3"), not its place in line
                      "none"  told nothing about the team: going back to mark the way is offered at every Way Out"""
         self.m = maze
         self.surfaces = assign_surfaces(maze.n, seed, mix or {})
@@ -118,9 +120,13 @@ class RelayGame:
         self.cap = cap_factor * maze.n
         self.turns = 0
         self.briefing = briefing
+        n = len(self.players)
         for i, p in enumerate(self.players):
-            after = len(self.players) - i - 1
-            p.after = after if briefing == "team" and p._paper(f"TEAM: {after} ants come in after me") else None
+            p.after, p.team_size = None, None
+            if briefing == "team" and p._paper(f"TEAM: {n - i - 1} ants come in after me"):
+                p.after = n - i - 1
+            elif briefing == "size" and p._paper(f"TEAM: I am one of {n} ants"):
+                p.team_size = n
 
     @property
     def done(self):
@@ -138,7 +144,7 @@ class RelayGame:
         a = self.cur
         if a.marked or a.trailing or self.m.goal not in self.m.adj[a.pos]:
             return False
-        return self.briefing == "none" or bool(a.after)
+        return self.briefing == "none" or bool(a.after) or (a.team_size or 0) > 1
 
     # ---- what the ant sees ----------------------------------------------------------
     def screen(self):
@@ -157,7 +163,8 @@ class RelayGame:
         if a.trailing and a.route and cur in a.route:
             k = a.route.index(cur)
             note = f"out {names[a.route[k + 1]]}"
-            if (len(m.adj[cur]) >= 3 or cur == m.start) and note not in self.marks.get(cur, []):
+            if (len(m.adj[cur]) >= 3 or cur == m.start) and note not in self.marks.get(cur, []) \
+                    and cur not in a.wrote:                      # one try per room
                 write = note
         text, options = V.view(names[cur], doors, untried, came, open_, a.last, walls=self.surfaces[cur],
                                marks=self.marks.get(cur, []), write=write)
@@ -167,6 +174,8 @@ class RelayGame:
                          + " walls did not come out")
         if a.after:
             extra.append(f"Your notes: {a.after} ants come in after you")
+        if a.team_size:
+            extra.append(f"Your notes: you are one of {a.team_size} ants")
         if self.offer_mark():
             back = len(a.path(m.start) or [cur]) - 1
             extra.append(f"B - go back and mark the way for the ants still to come "
@@ -189,7 +198,8 @@ class RelayGame:
         names, cur = m.names, a.pos
         if "B" in options:
             back = len(a.path(m.start) or [cur]) - 1
-            followers = a.after if a.after is not None else 1          # unbriefed: hope for one
+            followers = a.after if a.after is not None else \
+                (a.team_size - 1) / 2 if a.team_size else 1             # size only: half may still come
             if followers * (a.moves - back) > 2 * back + 2:           # worth the walk for the ants to come
                 return "B", "mark"
             return by_door[names[m.goal]], "goal"
@@ -242,6 +252,7 @@ class RelayGame:
             text = action[1]
             surf = self.surfaces[a.pos]
             line, _ = a.pen.render(text, surf, a.seed)
+            a.wrote.add(a.pos)
             a.moves += 1
             a.writes += 1
             if line:
