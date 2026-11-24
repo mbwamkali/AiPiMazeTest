@@ -59,6 +59,9 @@ aside { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .big { font-family: var(--f-display); font-size: 26px; font-weight: 600; line-height: 1; }
 .row { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; }
 .sw { display: inline-block; width: 14px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.gauge { height: 8px; border-radius: 4px; background: var(--bg); overflow: hidden; }
+.gauge > i { display: block; height: 100%; background: var(--accent); }
+.mat { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 5px; border: 1px solid var(--line); }
 .said.nb { white-space: pre-wrap; max-height: 320px; overflow: auto; margin: 0; font-size: 11px; }
 .said { font-family: var(--f-mono); font-size: 12px; background: var(--bg); border-radius: 6px; padding: 6px 8px; overflow-wrap: anywhere; }
 .tag { font-size: 11px; color: var(--muted); }
@@ -92,6 +95,10 @@ svg.spark { width: 100%; height: 100px; display: block; }
         <div><div class="tag">What the player typed</div><div class="said" id="said">–</div></div>
       </div>
       <div class="card" id="nbcard" hidden><h2>Player's notebook</h2><pre class="said nb" id="nbook">(blank)</pre><p class="note" id="nbnote"></p></div>
+      <div class="card" id="pencard" hidden><h2>Pen and walls <span class="tag">(the player never sees these numbers)</span></h2>
+        <div><div class="tag" id="inklbl">Ink</div><div class="gauge"><i id="ink" style="width:100%"></i></div></div>
+        <div><div class="tag" id="tiplbl">Tip</div><div class="gauge"><i id="tip" style="width:100%"></i></div></div>
+        <dl class="kv" id="penkv"></dl><p class="note" id="matlegend"></p></div>
       <div class="card"><h2>Distance to the Way Out</h2><svg class="spark" id="spark" role="img" aria-label="Distance to goal after each move"></svg><p class="note" id="sparknote"></p></div>
       <div class="card"><h2>Moves</h2><ol class="moves" id="moves"></ol></div>
       <div class="card"><h2>Room under the pointer</h2><dl class="kv" id="hover"><dt>—</dt><dd>hover a room</dd></dl></div>
@@ -113,6 +120,9 @@ function readColors() { const cs = getComputedStyle(document.documentElement); f
 readColors();
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// wall materials (wood, the default, is left plain)
+const MAT = { plaster: '#e6dcc3', brick: '#b5523b', stone: '#8d8a84', damp_stone: '#4f8296', ice: '#8fd3f0', glass: '#9fe0d6', metal: '#6c7a89', tile: '#d8c48f' };
+const matName = s => String(s || 'wood').replace('_', ' ');
 // ---- geometry: a flat grid. Room id = x + n*y (keeper numbering); y grows downward, so y+ is south ----
 function moveName(p, q) { const dx = q[0] - p[0], dy = q[1] - p[1]; if (Math.abs(dx) + Math.abs(dy) !== 1) return '?'; return dx > 0 ? 'east' : dx < 0 ? 'west' : dy > 0 ? 'south' : 'north'; }
 
@@ -129,7 +139,8 @@ function buildMaze(d) {
 }
 const hasDoor = (a, b) => M.open.has(Math.min(a, b) + ',' + Math.max(a, b));
 function loadRun(d) {
-  RUN = { meta: d, path: [d.start, ...d.steps.map(s => s[0])], times: [0, ...d.steps.map(s => s[1])], said: ['', ...d.steps.map(s => s[2] || '')] };
+  RUN = { meta: d, path: [d.start, ...d.steps.map(s => s[0])], times: [0, ...d.steps.map(s => s[1])], said: ['', ...d.steps.map(s => s[2] || '')],
+          walls: d.walls || null, pen: [null], writes: [] };   // writes: {k, room, surface, intended, rendered}
   M = buildMaze(d);
   subline();
   $('scrub').max = RUN.path.length - 1;
@@ -157,6 +168,10 @@ function draw() {
   const { R, ox, oy, center } = GEO, n = M.n, lw = Math.min(4, Math.max(1.5, R * VIEW.s * 0.06)) / VIEW.s;
   // rooms
   for (let i = 0; i < M.N; i++) { const [x, y] = M.rooms[i].xyz; ctx.fillStyle = roomFill(i); ctx.fillRect(ox + R * x, oy + R * y, R, R); }
+  if (RUN.walls) for (let i = 0; i < M.N; i++) { const c = MAT[RUN.walls[i]]; if (!c) continue; const [x, y] = M.rooms[i].xyz, X = ox + R * x, Y = oy + R * y;
+    ctx.fillStyle = c; ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(X + R * 0.34, Y); ctx.lineTo(X, Y + R * 0.34); ctx.closePath(); ctx.fill(); }
+  { const w = RUN.writes.filter(m => m.k <= S.t); for (const m of w) { const [cx, cy] = center(m.room); ctx.fillStyle = m.rendered ? C.fg : C.muted; ctx.globalAlpha = m.rendered ? 0.85 : 0.4;
+      ctx.fillRect(cx + R * 0.18, cy - R * 0.36, R * 0.16, R * 0.06); ctx.globalAlpha = 1; } }
   if (HOVER >= 0) { const [x, y] = M.rooms[HOVER].xyz; ctx.strokeStyle = C.accent; ctx.lineWidth = 2 / VIEW.s; ctx.strokeRect(ox + R * x + 3 / VIEW.s, oy + R * y + 3 / VIEW.s, R - 6 / VIEW.s, R - 6 / VIEW.s); }
   // room names once zoomed in far enough to read them
   if (R * VIEW.s > 72) { ctx.fillStyle = C.muted; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; const fs = Math.max(9 / VIEW.s, R * 0.12); ctx.font = `500 ${fs}px sans-serif`;
@@ -196,6 +211,8 @@ function panel() {
   $('now').innerHTML = `<dt>Room</dt><dd>${esc(M.names[cur])}${cur === M.goal ? ' · OUT' : ''}</dd><dt>(x, y)</dt><dd>(${o.xyz.join(', ')})</dd>`
     + (t ? `<dt>Last move</dt><dd>${moveName(M.rooms[RUN.path[t - 1]].xyz, o.xyz)}</dd>` : '')
     + `<dt>Closest so far</dt><dd>${best} moves away</dd><dt>Revisits</dt><dd>${revisits}</dd><dt>Clock</dt><dd>${fmtT(RUN.times[t])} since start</dd>`;
+  if (RUN.walls) $('now').innerHTML += `<dt>Walls</dt><dd><span class="mat" style="background:${MAT[RUN.walls[cur]] || 'transparent'}"></span>${esc(matName(RUN.walls[cur]))}</dd>`;
+  penPanel();
   $('said').textContent = t ? RUN.said[t] || '–' : '(start)';
   if (RUN.nb) { let k = Math.min(t, RUN.nb.length - 1); while (k > 0 && !RUN.nb[k]) k--; $('nbook').textContent = RUN.nb[k] || '(blank)';
     $('nbnote').textContent = RUN.nbLine[k] ? `Last line typed: ${RUN.nbLine[k]}` : ''; }
@@ -203,6 +220,17 @@ function panel() {
   document.querySelectorAll('#moves li').forEach((li, i) => li.classList.toggle('cur', i === t));
   const curLi = document.querySelector('#moves li.cur'); if (curLi) { const box = $('moves'), top = curLi.offsetTop - box.offsetTop; if (top < box.scrollTop || top + curLi.offsetHeight > box.scrollTop + box.clientHeight) box.scrollTop = top - box.clientHeight / 2; }
   spark();
+}
+function penPanel() {
+  if ($('pencard').hidden) return;
+  let k = Math.min(S.t, RUN.pen.length - 1); while (k > 0 && !RUN.pen[k]) k--; const p = RUN.pen[k], full = RUN.meta.pen_ink || 200000;
+  const ink = p ? p.ink : full, tip = p ? p.tip : 1;
+  $('ink').style.width = Math.max(0, Math.min(100, 100 * ink / full)).toFixed(1) + '%'; $('tip').style.width = Math.max(0, Math.min(100, 100 * tip)).toFixed(1) + '%';
+  $('inklbl').textContent = `Ink: ${Math.round(ink).toLocaleString()} of ${full.toLocaleString()} (${(100 * ink / full).toFixed(1)}%)`;
+  $('tiplbl').textContent = `Tip: ${(100 * tip).toFixed(0)}%` + (tip <= 0 ? ' · broken' : tip < 0.5 ? ' · skipping letters' : '');
+  const w = RUN.writes.filter(m => m.k <= S.t), last = w.at(-1);
+  $('penkv').innerHTML = `<dt>Wall notes</dt><dd>${w.length} (${w.filter(m => !m.rendered).length} didn't show)</dd>`
+    + (last ? `<dt>Last, meant</dt><dd>${esc(last.intended)}</dd><dt>Came out</dt><dd>${esc(last.rendered || '(nothing)')} · ${esc(matName(last.surface))}</dd>` : '');
 }
 function movesList() { const P = RUN.path; $('moves').innerHTML = P.map((r, i) => `<li data-t="${i}"><span class="d">${i}</span><span>${esc(M.names[r])}</span><span class="d">${i ? moveName(M.rooms[P[i - 1]].xyz, M.rooms[r].xyz) : 'start'}</span></li>`).join(''); }
 $('moves').addEventListener('click', e => { const li = e.target.closest('li'); if (li) setT(+li.dataset.t); });
@@ -220,7 +248,9 @@ function showHover() {
   if (HOVER < 0) { $('hover').innerHTML = '<dt>—</dt><dd>hover a room</dd>'; return; }
   const o = M.rooms[HOVER], ex = M.adj[HOVER].map(j => moveName(o.xyz, M.rooms[j].xyz)).sort().join('  ') || 'none';
   const firstVisit = RUN.path.indexOf(HOVER);
-  $('hover').innerHTML = `<dt>Room</dt><dd>${esc(M.names[HOVER])} #${HOVER}</dd><dt>(x, y)</dt><dd>(${o.xyz.join(', ')})</dd><dt>Exits</dt><dd>${ex}</dd><dt>To goal</dt><dd>${M.dist[HOVER]} moves</dd><dt>Visits</dt><dd>${visits[HOVER]} by move ${S.t}${firstVisit >= 0 ? ` (first at move ${firstVisit})` : ''}</dd>`;
+  $('hover').innerHTML = `<dt>Room</dt><dd>${esc(M.names[HOVER])} #${HOVER}</dd><dt>(x, y)</dt><dd>(${o.xyz.join(', ')})</dd><dt>Exits</dt><dd>${ex}</dd><dt>To goal</dt><dd>${M.dist[HOVER]} moves</dd><dt>Visits</dt><dd>${visits[HOVER]} by move ${S.t}${firstVisit >= 0 ? ` (first at move ${firstVisit})` : ''}</dd>`
+    + (RUN.walls ? `<dt>Walls</dt><dd>${esc(matName(RUN.walls[HOVER]))}</dd>` : '')
+    + RUN.writes.filter(m => m.room === HOVER && m.k <= S.t).map(m => `<dt>Note</dt><dd>${esc(m.rendered || '(nothing showed)')}${m.rendered !== m.intended ? ` · meant: ${esc(m.intended)}` : ''}</dd>`).join('');
 }
 
 // ---- pointer: hover, zoom, pan ----------------------------------------------------------------------
@@ -251,7 +281,9 @@ $('scrub').oninput = e => { stopPlay(); setT(+e.target.value); };
 $('trail').onchange = e => { S.trail = +e.target.value; draw(); };
 $('sol').onchange = e => { S.sol = e.target.checked; draw(); };
 document.addEventListener('keydown', e => { if (e.target.closest('select,input')) return; if (e.key === 'ArrowLeft') $('back').click(); else if (e.key === 'ArrowRight') $('fwd').click(); else if (e.key === ' ') { e.preventDefault(); $('play').click(); } });
-function legend() { $('legend').textContent = 'Dark lines are walls. A gap between two rooms is a door.'; }
+function legend() { $('legend').textContent = 'Dark lines are walls. A gap between two rooms is a door.'
+  + (RUN && RUN.walls && RUN.walls.some(w => MAT[w]) ? ' A coloured corner marks a room whose walls are not wood; a small bar marks a note written on its walls (grey: it did not show).' : '');
+  $('matlegend').innerHTML = RUN && RUN.walls ? [...new Set(RUN.walls)].map(w => `<span class="mat" style="background:${MAT[w] || 'transparent'}"></span>${esc(matName(w))} (${RUN.walls.filter(x => x === w).length})`).join(' &nbsp; ') : ''; }
 const reTheme = () => { readColors(); if (M) { legend(); spark(); draw(); } };
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', reTheme);
 new MutationObserver(reTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
@@ -285,18 +317,18 @@ async function boot() {
   $('runsel').value = pick.run_id; await openRun(pick.run_id);
 }
 $('runsel').onchange = e => { const u = new URL(location.href); u.searchParams.set('run', e.target.value); history.replaceState(null, '', u); openRun(e.target.value); };
-function compact(m, id) { return { run: id, dims: m.dims, size: m.size, seed: m.seed, start: m.start, goal: m.goal, shortest: m.shortest, max_moves: LIVE.maxMoves || 200, mode: '', names: m.rooms.map(r => r.name), exits: m.rooms.map(r => r.exits), steps: [] }; }
+function compact(m, id) { return { run: id, dims: m.dims, size: m.size, seed: m.seed, start: m.start, goal: m.goal, shortest: m.shortest, max_moves: LIVE.maxMoves || 200, mode: '', names: m.rooms.map(r => r.name), exits: m.rooms.map(r => r.exits), steps: [], walls: m.rooms.map(r => r.walls || 'wood') }; }
 function badge(text, live) { $('badge').textContent = text; $('badge').classList.toggle('live', !!live); }
 async function openRun(id) {
   if (LIVE.es) LIVE.es.close(); stopPlay();
   Object.assign(LIVE, { run: id, es: null, lastSeq: -1, t0: 0, said: '', ended: null, maxMoves: 200 });
   const m = await getJSON(`api/runs/${encodeURIComponent(id)}/map`);
   if (m.dims !== 2) { $('sub').textContent = 'This view shows 2D runs only. Older 4D runs: the multidim branch has the 4D viewer.'; return; }
-  show(compact(m, id), 0); RUN.nb = ['']; RUN.nbLine = ['']; $('nbcard').hidden = false; badge('connecting…'); connect();
+  show(compact(m, id), 0); RUN.nb = ['']; RUN.nbLine = ['']; $('nbcard').hidden = false; $('pencard').hidden = false; legend(); badge('connecting…'); connect();
 }
 function connect() {
   const es = new EventSource(withKey(`api/runs/${encodeURIComponent(LIVE.run)}/feed?since=${LIVE.lastSeq + 1}`)); LIVE.es = es;
-  for (const t of ['start', 'harness', 'walk', 'edit', 'refused', 'device', 'end']) es.addEventListener(t, onEv);
+  for (const t of ['start', 'harness', 'walk', 'wall', 'edit', 'refused', 'device', 'end']) es.addEventListener(t, onEv);
   es.onopen = () => badge(LIVE.ended ? 'ended' : 'live', !LIVE.ended);
   es.onerror = () => { if (!LIVE.ended) badge('reconnecting…'); };
 }
@@ -305,13 +337,17 @@ function render(jump) { if (jump) S.t = RUN.path.length - 1; if (renderPending) 
   requestAnimationFrame(() => { renderPending = false; $('scrub').max = RUN.path.length - 1; movesList(); setT(S.t); }); }
 async function onEv(ev) {
   let e; try { e = JSON.parse(ev.data); } catch { return; } if (e.seq <= LIVE.lastSeq) return; LIVE.lastSeq = e.seq;
-  if (e.t === 'start') { LIVE.t0 = e.t_wall; LIVE.maxMoves = (e.rulebook && e.rulebook.max_moves) || 200; RUN.meta.max_moves = LIVE.maxMoves; subline(); }
+  if (e.t === 'start') { LIVE.t0 = e.t_wall; LIVE.maxMoves = (e.rulebook && e.rulebook.max_moves) || 200; RUN.meta.max_moves = LIVE.maxMoves;
+    RUN.meta.pen_ink = (e.rulebook && e.rulebook.pen_ink) || 200000; subline(); }
+  else if (e.t === 'wall') { const k = RUN.path.length - 1; RUN.writes.push({ k, room: e.room, surface: e.surface, intended: e.intended || '', rendered: e.rendered || '' });
+    RUN.pen[k] = { ink: e.ink_after, tip: e.tip_after }; if (S.t === k) render(false); }
   else if (e.t === 'harness') LIVE.said = e.reply || e.sent || '';
   else if (e.t === 'walk') { const atEnd = S.t === RUN.path.length - 1;
     RUN.path.push(e.to); RUN.times.push(Math.max(0, Math.round(e.t_wall - LIVE.t0))); RUN.said.push(String(LIVE.said).slice(0, 120)); LIVE.said = '';
-    if (RUN.nb) { RUN.nb.push(''); RUN.nbLine.push(''); }
+    if (RUN.nb) { RUN.nb.push(''); RUN.nbLine.push(''); } RUN.pen.push(null);
     render($('follow').checked && atEnd); }
   else if (e.t === 'device' && RUN.nb) { const k = RUN.path.length - 1; RUN.nb[k] = e.screen || ''; RUN.nbLine[k] = String(e.input || '').slice(0, 120);
+    if (e.pen && e.pen.length) { const q = e.pen.at(-1); RUN.pen[k] = { ink: q.ink_after, tip: q.tip_after }; }
     if (S.t === k) render(false); }
   else if (e.t === 'edit') { try { const m = await getJSON(`api/runs/${encodeURIComponent(LIVE.run)}/map`); RUN.meta.names = m.rooms.map(r => r.name); RUN.meta.exits = m.rooms.map(r => r.exits); M = buildMaze(RUN.meta); render(false); } catch {} }
   else if (e.t === 'end') { LIVE.ended = e.result || 'ended'; badge('ended'); subline(); if (LIVE.es) LIVE.es.close(); }
