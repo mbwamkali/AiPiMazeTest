@@ -632,5 +632,94 @@ class TestEndToEnd(unittest.TestCase):
             kp.close()
 
 
+
+class TestViewer(unittest.TestCase):
+    """The viewer relay: pages, run logs, saved matches, and the viewer key."""
+
+    def setUp(self):
+        from http.server import ThreadingHTTPServer
+        from arena import viewer
+        self.keeper = Keeper()
+        self.mdir = tempfile.mkdtemp()
+        page = os.path.join(ROOT, "viewer", "colosseum.html")
+        flat = os.path.join(ROOT, "viewer", "index.html")
+        relay = viewer.Relay(f"http://127.0.0.1:{self.keeper.aport}", self.keeper.k.keys["admin"], page, flat, self.mdir)
+        h = type("H", (viewer.Handler,), {"relay": relay, "viewer_key": "vk", "log_message": lambda *a: None})
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), h)
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+        self.keeper.close()
+        shutil.rmtree(self.mdir, ignore_errors=True)
+
+    def get(self, path, method="GET", body=None):
+        st, data, hd = self.keeper.req(self.port, method, path, body)
+        return st, data, hd
+
+    def race(self, n=2, seed=11):
+        ids = []
+        for i in range(n):  # same maze; a different rulebook keeps the signed requests apart
+            rid, tok = self.keeper.new_run(dims=2, size=4, seed=seed, rulebook={"max_moves": 100 + i})
+            st, room = self.keeper.room(tok)
+            self.keeper.walk(tok, room["doors"][0])
+            ids.append(rid)
+        return ids
+
+    def test_pages_and_key(self):
+        st, data, _ = self.get("/?key=vk")
+        self.assertEqual(st, 200)
+        self.assertIn(b"Colosseum", data)
+        st, data, _ = self.get("/flat?key=vk")
+        self.assertEqual(st, 200)
+        self.assertNotEqual(data, self.get("/?key=vk")[1])
+        self.assertEqual(self.get("/api/runs")[0], 401)
+        self.assertEqual(self.get("/api/matches?key=wrong")[0], 401)
+        self.assertEqual(self.get("/api/matches", "POST", {"runs": ["x"]})[0], 401)
+
+    def test_log(self):
+        rid = self.race(1)[0]
+        st, data, _ = self.get(f"/api/runs/{rid}/log?key=vk")
+        self.assertEqual(st, 200)
+        kinds = [e["t"] for e in json.loads(data)["events"]]
+        self.assertEqual(kinds[:2], ["start", "walk"])
+
+    def test_save_list_open(self):
+        ids = self.race(2)
+        st, data, _ = self.get("/api/matches?key=vk", "POST", {"name": "Test race!", "runs": ids})
+        self.assertEqual(st, 201, data)
+        saved = json.loads(data)
+        self.assertTrue(saved["id"].endswith("test-race"))
+        self.assertEqual([c["run"] for c in saved["contestants"]], ids)
+        st, data, _ = self.get("/api/matches?key=vk")
+        self.assertEqual([m["id"] for m in json.loads(data)["matches"]], [saved["id"]])
+        st, data, _ = self.get(f"/api/matches/{saved['id']}?key=vk")
+        doc = json.loads(data)
+        self.assertEqual(doc["format"], "hypermaze-match")
+        self.assertEqual(len(doc["runs"]), 2)
+        self.assertEqual(doc["runs"][0]["events"][1]["t"], "walk")
+        self.assertEqual(doc["map"]["seed"], 11)
+        # the file sits in the viewer's own folder; nothing in the browser, nothing at the keeper
+        self.assertEqual(os.listdir(self.mdir), [saved["id"] + ".json"])
+        # saved matches outlive the keeper's data
+        shutil.rmtree(os.path.join(self.keeper.dir, "runs"))
+        self.assertEqual(self.get(f"/api/matches/{saved['id']}?key=vk")[0], 200)
+
+    def test_bad_saves(self):
+        ids = self.race(1)
+        other, _ = self.keeper.new_run(dims=2, size=4, seed=99)
+        self.assertEqual(self.get("/api/matches?key=vk", "POST", {"runs": []})[0], 400)
+        self.assertEqual(self.get("/api/matches?key=vk", "POST", {"runs": ["../etc"]})[0], 400)
+        self.assertEqual(self.get("/api/matches?key=vk", "POST", {"runs": ["a"] * 9})[0], 400)
+        self.assertEqual(self.get("/api/matches?key=vk", "POST", {"runs": ["no-such-run"]})[0], 404)
+        st, data, _ = self.get("/api/matches?key=vk", "POST", {"runs": ids + [other]})
+        self.assertEqual(st, 400)
+        self.assertIn(b"different mazes", data)
+        self.assertEqual(self.get("/api/matches/../../x?key=vk")[0], 404)
+        self.assertEqual(self.get("/api/runs?key=vk", "POST", {})[0], 405)
+        self.assertEqual(os.listdir(self.mdir), [])
+
 if __name__ == "__main__":
     unittest.main()

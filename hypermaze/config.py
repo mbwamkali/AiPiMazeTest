@@ -20,7 +20,7 @@ SCHEMA = {
     "keeper": {"data": str, "contestant": str, "admin": str, "harness": str,
                "tls_cert": str, "tls_key": str, "keys_file": str},
     "viewer": {"listen": str, "keeper": str, "keys_file": str, "tls_cert": str, "tls_key": str,
-               "public_host": str, "page": str},
+               "public_host": str, "page": str, "flat_page": str, "matches_dir": str},
     "runner": {"server": str, "ca_cert": str, "token_file": str, "mode": str,
                "pages": int, "lines": int, "width": int},
     "ant": {"llm": str, "model": str, "llama_server": str, "threads": int, "ctx": int, "llm_port": int,

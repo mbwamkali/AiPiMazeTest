@@ -167,7 +167,14 @@ tools/arena.py say <run id> "A cold draft blows through."
 tools/arena.py edit <run id> '{"type":"swap_rooms","a":"Coral Hall","b":"Iron Den"}' --why "test"
 tools/arena.py map <run id> -o maze.json
 tools/arena.py stop <run id> "The lights go out."
+tools/race.py --size 10 --seed 777 --pace 0.5      # practice race: the teacher bots on one maze
 ```
+
+`tools/race.py` starts one run per ant on the same maze and plays them at the same time with the
+strategy bots the ants learned from, so the Colosseum has a race to show without Pis or models.
+It reads the maze from its seed, so it is a test and show tool, never a contestant. A real ant can
+join the same race: start it on the same size, seed and loops within 20 minutes and the Colosseum
+puts them in one match.
 
 Edits: `remove_door`, `add_door`, `swap_rooms`, `shift_block`, `rename_room`, `message`. The keeper
 always refuses an edit that changes the room the player stands in or the doors it shows, moves or
