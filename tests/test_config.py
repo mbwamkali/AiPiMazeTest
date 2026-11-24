@@ -479,15 +479,17 @@ class TestHm(unittest.TestCase):
         self.assertTrue(all("UMask=0077" in t for t in (llm, ant)))
         with open(self.calls) as f:
             calls = f.read()
-        self.assertNotIn("enable", calls)                  # nothing of the ant is enabled
+        # only the agent starts at boot; the model and the ant itself start on demand
+        self.assertEqual([c for c in calls.splitlines() if "enable" in c], ["systemctl --user enable hypermaze-ant-agent"])
         self.hm("start", "ant")
         self.hm("stop", "ant")
         self.hm("update")
         with open(self.calls) as f:
             calls = f.read().splitlines()
         self.assertIn("systemctl --user start hypermaze-ant", calls)
-        self.assertIn("systemctl --user stop hypermaze-ant hypermaze-llm", calls)
-        self.assertFalse([c for c in calls if "restart" in c and ("llm" in c or "hypermaze-ant" in c)])
+        self.assertIn("systemctl --user stop hypermaze-ant-agent hypermaze-ant hypermaze-llm", calls)
+        # update never restarts a game in progress or the model (the agent may restart: it holds no game)
+        self.assertFalse([c for c in calls if "restart" in c and ("llm" in c or c.endswith("hypermaze-ant"))])
 
     def test_config_masks_and_checks(self):
         d = os.path.join(self.home, "hypermaze", "config")

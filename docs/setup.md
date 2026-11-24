@@ -163,7 +163,7 @@ HOUSE_TOKEN=<token> HARNESS_KEY=$(cat /path/to/harness.key) python3 -m ant.pi_ru
 
 ```bash
 pip install torch transformers peft
-python3 -m ant.compact --out lessons.jsonl --mazes 2000          # v2 lessons for all three ants
+python3 -m ant.bots --v2 --out lessons.jsonl --mazes 2000         # v2 lessons for all three ants
 python3 -m ant.train --model Qwen/Qwen3-0.6B --data lessons.jsonl --out runs/ant
 python3 -m ant.score --backend hf --model runs/ant --v2 --persona Harry --mazes 200
 ```

@@ -1,11 +1,11 @@
-"""Optional TOML settings files for the keeper, viewer, runner and ant.
+"""Optional TOML settings files, one per component (the components and their keys are in schema.py).
 
 One file per component, by default ~/hypermaze/config/<component>.toml (used only if it exists;
 --config PATH picks another, and then the file must exist). Precedence for every setting:
 
     command-line flag  >  environment variable  >  settings file  >  built-in default
 
-Secrets are never values in these files, only paths to files that hold them (keys.json, a token
+Secrets are never values in these files, only paths to files that hold them (a key file, a token
 file, a CA certificate). Reading TOML needs Python 3.11+ (tomllib); without a settings file,
 older Pythons work as before.
 """
@@ -13,27 +13,8 @@ import os
 import sys
 
 CONFIG_DIR = os.path.join("~", "hypermaze", "config")
-COMPONENTS = ("keeper", "viewer", "runner", "ant")
 
-# Known keys per component and their types; anything else in a file is an error, so typos show up.
-SCHEMA = {
-    "keeper": {"data": str, "contestant": str, "admin": str, "harness": str,
-               "tls_cert": str, "tls_key": str, "keys_file": str},
-    "viewer": {"listen": str, "keeper": str, "keys_file": str, "tls_cert": str, "tls_key": str,
-               "public_host": str, "page": str, "flat_page": str, "matches_dir": str},
-    "runner": {"server": str, "ca_cert": str, "token_file": str, "mode": str,
-               "pages": int, "lines": int, "width": int},
-    "ant": {"llm": str, "model": str, "llama_server": str, "threads": int, "ctx": int, "llm_port": int,
-            "persona": str, "temperature": float, "max_turns": int, "house": str, "report": str,
-            "harness_key_file": str, "token_file": str, "run_file": str, "ca_cert": str, "quiet": bool,
-            "idle_minutes": int},
-}
-# Settings with no built-in default that a service needs in its file, checked by `hm config edit`.
-REQUIRED = {"keeper": (), "viewer": (), "runner": (), "ant": ("model",)}
-PATH_KEYS = {"data", "tls_cert", "tls_key", "keys_file", "page", "ca_cert", "token_file", "model",
-             "llama_server", "harness_key_file", "run_file"}
-CHOICES = {("runner", "mode"): ("none", "notes", "notebook"),
-           ("ant", "persona"): ("NoMoe", "Harry", "Curlee")}
+from .schema import CHOICES, COMPONENTS, PATH_KEYS, REQUIRED, SCHEMA  # noqa: E402,F401
 
 
 class ConfigError(Exception):

@@ -18,6 +18,8 @@ import threading
 import time
 from urllib.parse import urlsplit, parse_qsl, urlencode
 
+from hypermaze.signing import sign  # noqa: F401  (re-exported: arena.auth.sign)
+
 WINDOW = 60
 
 
@@ -35,12 +37,6 @@ def load_keys(data_dir, create=True, rotate=False, path=None):
     with os.fdopen(fd, "w") as f:
         json.dump(keys, f, indent=1)
     return keys
-
-
-def sign(key, method, path, body=b"", ts=None):
-    ts = str(int(time.time()) if ts is None else ts)
-    msg = "\n".join([method.upper(), path, ts, hashlib.sha256(body).hexdigest()]).encode()
-    return ts, hmac.new(bytes.fromhex(key), msg, hashlib.sha256).hexdigest()
 
 
 def split_signed_path(raw_path):

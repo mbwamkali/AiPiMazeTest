@@ -156,7 +156,7 @@ def supervise(cmd, port, idle_minutes, poll=30.0, idle_seconds=None):
     except OSError:
         pid_path = None
     try:
-        return _watch(child, stopping, port, idle_minutes, poll, idle_seconds)
+        return _serve_until_idle(child, stopping, port, idle_minutes, poll, idle_seconds)
     finally:
         if pid_path:
             try:
@@ -165,7 +165,7 @@ def supervise(cmd, port, idle_minutes, poll=30.0, idle_seconds=None):
                 pass
 
 
-def _watch(child, stopping, port, idle_minutes, poll, idle_seconds):
+def _serve_until_idle(child, stopping, port, idle_minutes, poll, idle_seconds):
 
     def forward(sig, _frame):
         stopping.append(sig)

@@ -1,7 +1,7 @@
 """v2 ant format, built for speed on the Pis.
 
 - The game's notes screen is rewritten as a short numbered door list (parsed from the
-  screen text, so it works the same in-process and through the keeper).
+  screen text, so it works the same in-process and through the house).
 - The ant answers with the door NUMBER first ("GO: 2" or "GO: map"), so the move can be
   sent the moment that line arrives.
 - In talk mode it adds one in-character line after the GO line only at interesting
@@ -11,8 +11,6 @@
     view, doors = compact.view(screen_text, last)
     move = compact.parse(reply, doors)        # room name, "map", or None
 """
-import json
-import random
 import re
 
 from . import personas as P
@@ -98,36 +96,3 @@ def wants_comment(kind, ndoors, rng):
     if kind == "back" and ndoors == 1:      # a true dead end
         return True
     return rng.random() < CHATTY_DULL
-
-
-def main(argv=None):
-    import argparse
-    from hypermaze import Maze
-    from .lessons import maze_mix
-    ap = argparse.ArgumentParser(description="v2 (fast) lessons for the stooge ants")
-    ap.add_argument("--out", required=True)
-    ap.add_argument("--mazes", type=int, default=200, help="mazes per ant")
-    ap.add_argument("--seed-base", type=int, default=100000)
-    ap.add_argument("--quiet-share", type=float, default=0.25)
-    ap.add_argument("--wrong", type=float, default=0.05)
-    a = ap.parse_args(argv)
-    rng = random.Random(a.seed_base)
-    n = talk = 0
-    with open(a.out, "w") as f:
-        for p in P.NAMES:
-            for i in range(a.mazes):
-                dims, size, loops, gen = maze_mix(rng)
-                maze = Maze(dims, size, loops, seed=a.seed_base + i, generator=gen)
-                for screen, last, cmd, reason, kind in P.play(p, maze, rng, a.wrong):
-                    quiet = rng.random() < a.quiet_share
-                    msgs, doors = messages(p, screen, last, quiet)
-                    say = None if quiet or not wants_comment(kind, len(doors), rng) else reason
-                    msgs.append({"role": "assistant", "content": answer(cmd, doors, say)})
-                    f.write(json.dumps({"messages": msgs}) + "\n")
-                    n += 1
-                    talk += say is not None
-    print(f"{n} lessons, {talk} with a comment ({talk / max(1, n):.0%}) -> {a.out}")
-
-
-if __name__ == "__main__":
-    main()

@@ -1,9 +1,9 @@
-"""Play one stooge ant blind through the keeper, and show its lines in the Colosseum viewer.
+"""Play one stooge ant through the house.
 
-The ant only sees what the keeper hands out (runner/house.py in notes mode). Each screen
+The ant only sees what the house hands out (runner/house.py in notes mode). Each screen
 becomes the v2 numbered-door view; the "Last action" line is worked out from the screens
-alone, the same way as in training. Every turn is posted to the keeper's harness port
-(signed with $HARNESS_KEY), which is what the viewer shows as the ant's speech.
+alone, the same way as in training. With --report, each turn's line is also posted to the
+report URL (signed with $HARNESS_KEY).
 
     HOUSE_TOKEN=<run token> HARNESS_KEY=<key> python3 -m ant.pi_runner --persona NoMoe \
         --house http://127.0.0.1:7341 --report http://127.0.0.1:7343 --run <run id> \
@@ -77,9 +77,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", help="settings file (default ~/hypermaze/config/ant.toml if it exists)")
     ap.add_argument("--persona", choices=P.NAMES, help="default NoMoe")
-    ap.add_argument("--house", help="keeper contestant URL (default http://127.0.0.1:7341)")
+    ap.add_argument("--house", help="the house URL (default http://127.0.0.1:7341)")
     ap.add_argument("--llm", help="the ant's llama-server (default http://127.0.0.1:8095)")
-    ap.add_argument("--report", help="keeper harness URL (key in $HARNESS_KEY or harness_key_file)")
+    ap.add_argument("--report", help="report URL (key in $HARNESS_KEY or harness_key_file)")
     ap.add_argument("--run", help="run id, for --report (default: first line of run_file)")
     ap.add_argument("--temperature", type=float, help="default 0.7")
     ap.add_argument("--quiet", action="store_true", default=None)
@@ -105,7 +105,7 @@ def main(argv=None):
 
     report = None
     if a.report:
-        from arena.auth import sign
+        from hypermaze.signing import sign
         key = os.environ.get("HARNESS_KEY") or \
             (config.read_secret(cfg["harness_key_file"]) if cfg.get("harness_key_file") else "")
         if not key or not a.run:
@@ -125,7 +125,7 @@ def main(argv=None):
     if not wait_for_llm(a.llm):
         sys.exit(f"no answer from the ant's llama-server at {a.llm}")
     house = House(a.house, token)
-    notes = AntNotes(house)      # the ant's only memory: its notebook, kept by the keeper
+    notes = AntNotes(house)      # the ant's only memory: its notebook, kept by the house
     view = house.room()
     notes.room(view["room"], view["doors"])
     screen = notes.screen(view)
