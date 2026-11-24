@@ -46,7 +46,7 @@ def parse(reply):
 
 
 class Run:
-    def __init__(self, spec, quiet, persona=None, v2=False):
+    def __init__(self, spec, quiet, persona=None, v2=False, prompt_name=None):
         dims, size, loops, gen, seed = spec
         self.spec = spec
         self.m = Maze(dims, size, loops, seed=seed, generator=gen)
@@ -54,7 +54,8 @@ class Run:
         self.screen = room_screen(self.g.intro())
         self.limit = self.m.n * 4
         self.quiet = quiet
-        self.persona = persona
+        self.persona = P.canonical(persona) if persona else None
+        self.prompt_name = prompt_name
         self.v2 = v2
         self.doors = []
         self.out_chars = 0
@@ -69,10 +70,10 @@ class Run:
 
     def messages(self):
         if self.v2:
-            msgs, self.doors = C.messages(self.persona, self.screen, self.last, self.quiet)
+            msgs, self.doors = C.messages(self.persona, self.screen, self.last, self.quiet, self.prompt_name)
             return msgs
         if self.persona:
-            return P.messages(self.persona, self.screen, self.last, self.quiet)
+            return P.messages(self.persona, self.screen, self.last, self.quiet, self.prompt_name)
         return [{"role": "system", "content": SYSTEM_QUIET if self.quiet else SYSTEM_TALK},
                 {"role": "user", "content": self.screen}]
 
@@ -96,7 +97,7 @@ class Run:
         self.out_chars += len(reply)
         if self.v2:
             if not self.doors:
-                C.messages(self.persona, self.screen, self.last, self.quiet)
+                C.messages(self.persona, self.screen, self.last, self.quiet, self.prompt_name)
             move = C.parse(reply, self.doors)
             rest = [l for l in reply.splitlines() if "GO:" not in l and l.strip()]
             reason = rest[0].strip() if rest else ""
@@ -177,14 +178,15 @@ def main(argv=None):
     ap.add_argument("--batch", type=int, default=64, help="games per GPU batch (hf) / parallel games (server)")
     ap.add_argument("--quiet", action="store_true", help="quiet mode: GO line only")
     ap.add_argument("--max-new", type=int, default=48)
-    ap.add_argument("--persona", choices=P.NAMES, help="play as one of the stooge ants")
+    ap.add_argument("--persona", choices=P.NAMES + tuple(P.ALIASES), help="play as one of the stooge ants")
+    ap.add_argument("--prompt-name", help="name used in the persona's system prompt (default: the trained one)")
     ap.add_argument("--v2", action="store_true", help="fast format: numbered doors, GO first, comments only at interesting moments")
     ap.add_argument("--temperature", type=float, default=0.0, help="0 = always the likeliest answer; >0 = some dice")
     ap.add_argument("--log", help="write every game's moves and reasons here")
     ap.add_argument("--json", help="write per-game results here")
     a = ap.parse_args(argv)
 
-    runs = [Run(s, a.quiet, a.persona, a.v2) for s in heldout(a.mazes)]
+    runs = [Run(s, a.quiet, a.persona, a.v2, a.prompt_name) for s in heldout(a.mazes)]
     t0 = time.time()
     if a.backend == "hf":
         run_hf(runs, a.model, a.batch, a.max_new, a.temperature)
@@ -197,7 +199,7 @@ def main(argv=None):
     res = [r.result() for r in runs]
     solved = [x for x in res if x["solved"]]
     steps = sum(x["steps"] for x in res)
-    print(f"backend={a.backend} model={a.model} persona={a.persona} quiet={a.quiet} temperature={a.temperature}")
+    print(f"backend={a.backend} model={a.model} persona={a.persona} prompt_name={a.prompt_name or 'trained'} quiet={a.quiet} temperature={a.temperature}")
     print(f"solved {len(solved)}/{len(res)}  "
           f"avg moves/shortest (solved) {sum(x['moves'] / max(1, x['shortest']) for x in solved) / max(1, len(solved)):.2f}")
     print(f"agrees with bot {sum(x['agree'] for x in res) / max(1, steps):.1%} of moves, "

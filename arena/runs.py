@@ -2,7 +2,7 @@
 
 Each run is a folder <data>/runs/<run_id>/ with
   run.json      settings, rulebook and its fingerprint, token hash
-  events.jsonl  append-only: start, walk, wall, edit, refused, message, harness, device, end
+  events.jsonl  append-only: start, walk, wall, edit, refused, message, harness, device, device_view, end
 The state (position, visits, the maze with its edits) is rebuilt by replaying events.jsonl,
 so a keeper restart picks up runs where they were.
 """
@@ -67,13 +67,13 @@ class Run:
         self._replaying = False
 
     # ---- events ---------------------------------------------------------------------
-    def _emit(self, ev, write=True):
+    def _emit(self, ev, write=True, sync=True):
         if self._replaying:  # rebuilding state from events.jsonl: the events are already there
             return ev
         with self.cond:
-            return self._emit_locked(ev, write)
+            return self._emit_locked(ev, write, sync)
 
-    def _emit_locked(self, ev, write):
+    def _emit_locked(self, ev, write, sync=True):
         ev.setdefault("t_wall", round(time.time(), 3))
         ev["seq"] = len(self.events)
         self.events.append(ev)
@@ -82,7 +82,8 @@ class Run:
                 self._file = open(os.path.join(self.dir, "events.jsonl"), "a", encoding="utf-8")
             self._file.write(json.dumps(ev) + "\n")
             self._file.flush()
-            os.fsync(self._file.fileno())
+            if sync:  # reads (device_view) skip the disk sync: losing one in a crash changes no state
+                os.fsync(self._file.fileno())
         self.cond.notify_all()
         return ev
 
@@ -208,11 +209,31 @@ class Run:
 
     # ---- devices (the notebook) ------------------------------------------------------
     def device_view(self, name, page=None):
-        """The device's screen. Reading changes nothing, so it is not an event."""
+        """The device's screen. Reading changes nothing in the notebook; the pages looked at are logged
+        as a device_view event (so the Colosseum can see what was read), which a replay skips."""
         if name != "notebook":
             raise LookupError("no_device")
         with self.lock:
+            p = self.notebook.open_page + 1 if page is None else page
+            if 1 <= p <= self.notebook.pages:
+                self._viewed(name, [p])
             return {"screen": self.notebook.view(page)}
+
+    def device_view_range(self, name, first, last):
+        """Pages first..last in one call: each screen exactly what device_view(page) gives, in page order.
+        A range outside the notebook gets the same answer as a page outside it."""
+        if name != "notebook":
+            raise LookupError("no_device")
+        with self.lock:
+            nb = self.notebook
+            if not 1 <= first <= last <= nb.pages:
+                return {"screens": [nb.view(0)]}
+            pages = list(range(first, last + 1))
+            self._viewed(name, pages)
+            return {"screens": [nb.view(p) for p in pages]}
+
+    def _viewed(self, name, pages):
+        self._emit({"t": "device_view", "device": name, "pages": pages, "turn": self.moves}, sync=False)
 
     def device_input(self, name, line, write=True):
         """One line typed into the device. Logged (so the Colosseum can watch), never costs a move."""

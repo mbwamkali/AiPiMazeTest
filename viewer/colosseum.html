@@ -40,11 +40,14 @@ a { color: var(--dust); }
 .badge.live { background: var(--boo); color: #1a0d0d; }
 .badge.replay { background: var(--torch); color: #1b1408; }
 .chip { background: rgba(16,18,28,.82); border: 1px solid var(--line); padding: 1px 8px; border-radius: 3px; color: var(--dust); }
-.hud { position: absolute; inset: 10px 10px auto auto; display: grid; gap: 6px; width: min(250px, 40%); pointer-events: none; }
+.hud { position: absolute; inset: 10px 10px auto auto; display: grid; gap: 6px; width: min(290px, 40%); pointer-events: none; }
 .hrow { display: grid; grid-template-columns: 12px 1fr auto; gap: 2px 8px; align-items: center; background: rgba(16,18,28,.84); border: 1px solid var(--line); border-radius: 5px; padding: 5px 9px; }
 .hrow.win { border-color: var(--torch); }
 .hrow i { width: 12px; height: 12px; border-radius: 50%; }
 .hrow b { font-family: var(--f-display); font-weight: 800; font-size: 1.05rem; text-transform: uppercase; line-height: 1; }
+.hrow span { text-align: right; }
+.hrow span small.lim { font-size: .62rem; color: var(--dust); white-space: nowrap; }
+.hrow small.pace { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
 .hrow small { display: block; font-size: .68rem; color: var(--dust); }
 .hrow span { font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-size: 1rem; }
 .hrow .bar { grid-column: 2 / 4; height: 3px; background: var(--stand-2); border-radius: 2px; overflow: hidden; }
@@ -169,9 +172,13 @@ $('flat').href = withKey('flat');
 function toast(t) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 3500); }
 
 // ---------- contestants ----------
-const COLORS = { NoMoe: '#ff6b5b', Harry: '#5fa8ff', Curlee: '#7ad66f' };
+// personas by their current names; old runs and saved matches that say NoMoe show as Mooore
+const RENAMED = { NoMoe: 'Mooore' };
+const personaName = w => (w ? RENAMED[w] || w : null);
+const renameText = t => String(t).replace(/\bNoMoe\b/g, 'Mooore');
+const COLORS = { Mooore: '#ff6b5b', Harry: '#5fa8ff', Curlee: '#7ad66f' };
 const SPARE = ['#ffd35b', '#d07bff', '#5be0d0', '#ff8fd0', '#c9c9c9'];
-const DEAD = { NoMoe: 'Who put a wall here?!', Harry: 'I knew it. A dead end.', Curlee: 'Hehe, wrong way again!' };
+const DEAD = { Mooore: 'Who put a wall here?!', Harry: 'I knew it. A dead end.', Curlee: 'Hehe, wrong way again!' };
 
 // ---------- maze geometry: any maze is room outlines + shared walls ----------
 // The keeper serves 2D square grids; other shapes only need another outline function here.
@@ -379,9 +386,9 @@ function makeAnt(a) {
   const legs = [];
   for (const x of [-.75, -.3, .15]) for (const z of [-1, 1]) { const piv = new THREE.Group(); piv.position.set(x * s, 1.05 * s, z * .3 * s);
     const L = new THREE.Mesh(new THREE.CylinderGeometry(s * .07, s * .05, s * 1.9, 5), dark); L.geometry.translate(0, -s * .95, 0); L.rotation.x = -z * 1.0; piv.add(L); g.add(piv); legs.push({ piv, x }); }
-  if (a.name === 'NoMoe') { const crown = new THREE.Mesh(new THREE.CylinderGeometry(s * .45, s * .55, s * .45, 6, 1, true), new THREE.MeshStandardMaterial({ color: 0xffc83a, metalness: .8, roughness: .3, side: THREE.DoubleSide })); crown.position.set(1.0 * s, 2.25 * s, 0); g.add(crown); }
-  if (a.name === 'Harry') for (const z of [-1, 1]) { const lens = new THREE.Mesh(new THREE.TorusGeometry(s * .3, s * .05, 6, 16), dark); lens.position.set(1.62 * s, 1.75 * s, z * .38 * s); lens.rotation.y = Math.PI / 2; g.add(lens); }
-  if (a.name === 'Curlee') for (let k = 0; k < 3; k++) { const tuft = new THREE.Mesh(new THREE.ConeGeometry(s * .12, s * .6, 5), new THREE.MeshStandardMaterial({ color: 0xfff176 })); tuft.position.set((.8 + k * .2) * s, 2.3 * s, (k - 1) * .15 * s); tuft.rotation.z = (k - 1) * .4; g.add(tuft); }
+  if (a.kind === 'Mooore') { const crown = new THREE.Mesh(new THREE.CylinderGeometry(s * .45, s * .55, s * .45, 6, 1, true), new THREE.MeshStandardMaterial({ color: 0xffc83a, metalness: .8, roughness: .3, side: THREE.DoubleSide })); crown.position.set(1.0 * s, 2.25 * s, 0); g.add(crown); }
+  if (a.kind === 'Harry') for (const z of [-1, 1]) { const lens = new THREE.Mesh(new THREE.TorusGeometry(s * .3, s * .05, 6, 16), dark); lens.position.set(1.62 * s, 1.75 * s, z * .38 * s); lens.rotation.y = Math.PI / 2; g.add(lens); }
+  if (a.kind === 'Curlee') for (let k = 0; k < 3; k++) { const tuft = new THREE.Mesh(new THREE.ConeGeometry(s * .12, s * .6, 5), new THREE.MeshStandardMaterial({ color: 0xfff176 })); tuft.position.set((.8 + k * .2) * s, 2.3 * s, (k - 1) * .15 * s); tuft.rotation.z = (k - 1) * .4; g.add(tuft); }
   const glow = new THREE.Mesh(new THREE.CircleGeometry(s * 2.6, 24), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: .35, depthWrite: false, blending: THREE.AdditiveBlending }));
   glow.rotation.x = -Math.PI / 2; glow.position.y = .03; g.add(glow);
   const pillar = new THREE.Mesh(new THREE.CylinderGeometry(s * .9, s * .9, 1, 12, 1, true), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: .55, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }));
@@ -429,18 +436,24 @@ function hashName(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(
 function makeAnts(runs) {
   const used = new Set();
   return runs.map((r, k) => {
-    const who = (r.events.find(e => e.t === 'harness' && e.where) || {}).where || null;
-    const name = who || `Ant ${k + 1}`;
+    const who = personaName((r.events.find(e => e.t === 'harness' && e.where) || {}).where || null);
+    // the ant's machine name (the run's agent, from the start event) leads; the persona it plays goes underneath
+    const st = r.events.find(e => e.t === 'start'), agent = (st && st.settings && st.settings.agent) || null;
+    const limit = (st && st.rulebook && st.rulebook.max_moves) || 0;   // 0 or missing: no move limit
+    const name = agent || who || `Ant ${k + 1}`;
     let color = COLORS[who]; if (!color || used.has(color)) color = SPARE[(hashName(r.run) + k) % SPARE.length]; used.add(color);
     const offs = [[-.12, -.08], [.12, -.08], [0, .13], [-.13, .1], [.13, .1], [0, -.15]];
-    return { run: r.run, name, color, off: offs[k % offs.length], events: r.events, moves: [], says: [], end: null, edits: [], k,
+    return { run: r.run, name, color, off: offs[k % offs.length], events: r.events, moves: [], says: [], end: null, edits: [], think: {}, k, persona: agent ? who : null, kind: who, limit,
              idx: -1, sayIdx: -1, visited: new Set(), bubble: null, status: 'At the gate', done: 0 };
   });
 }
 function ingest(a, ev) {
   const t = (ev.t_wall || 0) - T0;
   if (ev.t === 'walk') { const prev = a.moves.length ? a.moves[a.moves.length - 1].to : M.start; a.moves.push({ t, from: ev.from ?? prev, to: ev.to, n: ev.n, dist: ev.dist, result: ev.result }); }
-  else if (ev.t === 'harness' && ev.reply) { a.says.push({ t, text: String(ev.reply).replace(/GO:.*$/m, '').trim() }); if (ev.where && a.name.startsWith('Ant ')) a.name = ev.where; }
+  if (ev.t === 'harness' && ev.turn != null && ev.speed != null) a.think[ev.turn] = +ev.speed;
+  if (ev.t === 'harness' && ev.reply) { a.says.push({ t, text: renameText(String(ev.reply).replace(/GO:.*$/m, '').trim()) });
+    const w = personaName(ev.where); if (w && !a.kind) a.kind = w;
+    if (w && a.name.startsWith('Ant ')) a.name = w; else if (w && !a.persona && w !== a.name) a.persona = w; }
   else if (ev.t === 'end') a.end = { t, result: ev.result, moves: ev.moves };
   else if (ev.t === 'edit') a.edits.push({ t, summary: ev.summary, by: ev.by, edit: ev.edit });
   TEND = Math.max(TEND, t);
@@ -456,7 +469,7 @@ function prepare(runs, map) {
   ants = makeAnts(runs);
   for (const a of ants) for (const ev of a.events) ingest(a, ev);
   buildWorld(); buildDynamic(); camHome(); marks(); resetTo(0);
-  $('info').textContent = `${map.size}×${map.size} · seed ${map.seed}${map.loops ? ' · loops ' + map.loops : ''} · par ${map.shortest}`;
+  $('info').textContent = `${map.size}×${map.size} · seed ${map.seed}${map.loops ? ' · loops ' + map.loops : ''} · par ${map.shortest}${ants.length && ants[0].limit ? ' · limit ' + Math.max(...ants.map(a => a.limit)) : ''}`;
   hud(); return true;
 }
 function overlay(t) { $('overlay').hidden = !t; $('overlay').textContent = t; }
@@ -520,7 +533,7 @@ function advance(prev) {
       walkPrints(a, w); paintFloor([w.to, ...M.adj[w.to]]);
       if (!big && a.mesh && M.adj[w.to].length === 1 && w.to !== M.goal && w.result === 'new') {
         emit(a.mesh.position.clone().setY(.3), 40, { speed: 1.6, up: 1.2, grav: 2, life: 1.4, drag: .3, colors: [0xcbb48a, 0x9c8a6a, 0xe8d8b0] }); groan = 1;
-        if (!a.says.some(s => Math.abs(s.t - w.t) < 1.5)) say(a, DEAD[a.name] || 'Dead end!');
+        if (!a.says.some(s => Math.abs(s.t - w.t) < 1.5)) say(a, DEAD[a.kind] || 'Dead end!');
         tick(`<b style="color:${a.color}">${esc(a.name)}</b> hits a dead end in the ${esc(M.names[w.to])}.`);
       }
       if (fresh && !big) hype = Math.max(hype, .05);
@@ -546,20 +559,31 @@ function say(a, text) { a.bubble = { text, until: performance.now() + 3200 }; }
 let ticks = [];
 function tick(h) { ticks.unshift(h); ticks.length = Math.min(3, ticks.length); $('tick').innerHTML = ticks.map(t => `<li>${t}</li>`).join(''); }
 function tickerAt(ph) { ticks = []; const past = HL.filter(h => h.t <= ph && h.kind !== 'dead').slice(-3); if (!past.length) tick(`${ants.length} ant${ants.length === 1 ? '' : 's'} in the arena. Par is ${M.map.shortest} moves.`); for (const h of past) tick(esc(h.text)); }
+// real pace at the playhead: the last 20 moves, from the ants' own clocks (t_wall), split into LLM think time and the rest
+function pace(a) {
+  const i = a.idx, j = Math.max(0, i - 20); if (i < 1 || i - j < 2) return '';
+  const span = a.moves[i].t - a.moves[j].t, n = i - j, per = span / n;
+  const th = []; for (let k = j + 1; k <= i; k++) { const v = a.think[a.moves[k].n]; if (v != null) th.push(v); }
+  const think = th.length ? th.reduce((x, y) => x + y, 0) / th.length : null;
+  return `<small class="pace" title="Real pace over the last ${n} moves (from the ants' own clocks). Think = LLM time per turn; the rest is the game, notebook and network.">${Math.round(60 / per)}/min · ${per.toFixed(2)} s/move${think != null ? ` · think ${think.toFixed(2)}s` : ''}</small>`;
+}
 function hud() {
   $('hud').innerHTML = [...ants].sort((p, q) => (p.done || 99) - (q.done || 99) || q.visited.size - p.visited.size).map(a => {
     const w = a.moves[a.idx], d = w ? w.dist : M.dist[M.start], pct = Math.max(0, Math.min(100, 100 - d / Math.max(1, M.dist[M.start]) * 100));
-    return `<div class="hrow${a.done === 1 ? ' win' : ''}"><i style="background:${a.color}"></i><div><b>${esc(a.name)}</b><small>${a.status} · ${a.visited.size} rooms</small></div><span>${a.idx + 1}</span><div class="bar"><u style="width:${pct}%;background:${a.color}"></u></div></div>`; }).join('');
+    return `<div class="hrow${a.done === 1 ? ' win' : ''}"><i style="background:${a.color}"></i><div><b>${esc(a.name)}</b>${a.persona ? `<small class="persona">as ${esc(a.persona)}</small>` : ''}<small>${a.status} · ${a.visited.size} rooms</small>${pace(a)}</div><span>${a.idx + 1}<small class="lim">${a.limit ? ` / ${a.limit}` : ''} moves</small></span><div class="bar"><u style="width:${pct}%;background:${a.color}"></u></div></div>`; }).join('');
 }
 
 // ---------- timeline controls ----------
 function seek(ph) { PH = Math.max(0, Math.min(ph, TEND)); LIVE = false; resetTo(PH); updateMode(); }
 function setPlaying(p) { PLAYING = p; $('play').textContent = p ? 'Pause' : 'Play'; }
 function updateMode() { const canLive = MATCH && MATCH.live; $('golive').disabled = !canLive || LIVE;
+  // live races move at the ants' own pace: the speed button is not an option there, and Pause freezes into replay
+  $('speed').disabled = LIVE; $('speed').textContent = LIVE ? 'Real time' : SPEED + '×';
+  $('speed').title = LIVE ? 'Live races play at the ants\' own pace. Scrub back or pause to replay faster; it rejoins live when it catches up.' : 'Replay speed';
   $('badge').textContent = LIVE ? 'live' : MATCH && MATCH.saved ? 'saved match' : 'replay'; $('badge').className = 'badge ' + (LIVE ? 'live' : 'replay'); }
-$('play').onclick = () => { if (!PLAYING && !LIVE && PH >= TEND - .05) seek(0); setPlaying(!PLAYING); };
-$('speed').onclick = () => { SPEED = { 1: 2, 2: 4, 4: 8, 8: 16, 16: 1 }[SPEED]; $('speed').textContent = SPEED + '×'; if (LIVE && SPEED !== 1) { LIVE = false; updateMode(); } };
-$('golive').onclick = () => { LIVE = true; SPEED = 1; $('speed').textContent = '1×'; resetTo(Math.max(0, Date.now() / 1000 - T0)); setPlaying(true); updateMode(); };
+$('play').onclick = () => { if (LIVE) { LIVE = false; setPlaying(false); updateMode(); return; } if (!PLAYING && !LIVE && PH >= TEND - .05) seek(0); setPlaying(!PLAYING); };
+$('speed').onclick = () => { if (LIVE) return; SPEED = { 1: 2, 2: 4, 4: 8, 8: 16, 16: 1 }[SPEED]; updateMode(); };
+$('golive').onclick = () => { LIVE = true; SPEED = 1; resetTo(Math.max(0, Date.now() / 1000 - T0)); setPlaying(true); updateMode(); };
 let scrubbing = false;
 $('scrub').addEventListener('input', () => { scrubbing = true; seek(+$('scrub').value / 1000 * TEND); });
 $('scrub').addEventListener('change', () => { scrubbing = false; });
@@ -702,7 +726,7 @@ function ensureOverlays() {
     const p = document.createElement('div'); p.className = 'pip'; p.hidden = !PIP; stage.appendChild(p); pipBoxes.push(p); pipCams.push(new THREE.PerspectiveCamera(55, 4 / 3, .05, 600)); }
   labels.forEach((d, k) => { const a = ants[k]; d.hidden = !a; if (a) { d.style.color = a.color; d.textContent = a.name; bubbles[k].style.borderColor = a.color; pipBoxes[k].style.borderColor = a.color; pipBoxes[k].innerHTML = `<b style="color:${a.color}">${esc(a.name)} cam</b>`; } else { bubbles[k].hidden = true; pipBoxes[k].hidden = true; } });
 }
-let last = 0, frames = [];
+let last = 0, frames = [], rateAvg = 1;
 function frame(now) {
   requestAnimationFrame(frame);
   const raw = now - (last || now), dt = Math.min(50, raw); last = now; frames.push(raw); if (frames.length > 60) frames.shift();
@@ -710,10 +734,15 @@ function frame(now) {
   ensureOverlays();
   const prev = PH;
   if (LIVE) PH = Math.max(PH, Date.now() / 1000 - T0 - .2);
-  else if (PLAYING && !scrubbing) { PH = Math.min(TEND + MOVE, PH + dt / 1000 * SPEED); if (PH >= TEND + MOVE && !(MATCH && MATCH.live)) setPlaying(false); }
+  else if (PLAYING && !scrubbing) { PH = Math.min(TEND + MOVE, PH + Math.min(1000, raw) / 1000 * SPEED); // raw, not dt: slow frames must not slow the replay
+    if (MATCH && MATCH.live && PH >= TEND) { LIVE = true; SPEED = 1; updateMode(); }
+    else if (PH >= TEND + MOVE && !(MATCH && MATCH.live)) setPlaying(false); }
   if (PH < prev) resetTo(PH); else if (PH > prev) advance(prev);
   if (!scrubbing) $('scrub').value = Math.round(Math.min(1, PH / Math.max(.001, TEND)) * 1000);
-  $('time').textContent = `${fmt(PH)} / ${fmt(TEND)}`;
+  // the replay speed actually achieved (it falls short when it reaches the end of what has been recorded)
+  rateAvg = rateAvg * .9 + (raw > 0 ? (PH - prev) / (raw / 1000) : 0) * .1;
+  const showRate = !LIVE && PLAYING && SPEED > 1 && rateAvg < SPEED * .9;
+  $('time').textContent = `${fmt(PH)} / ${fmt(TEND)}${showRate ? ` · actual ${rateAvg.toFixed(1)}×` : ''}`;
   // ants
   for (const a of ants) { const g = a.mesh, ud = g.userData, p = antPos(a), dx = p[0] - g.position.x, dz = p[1] - g.position.z, mv = Math.hypot(dx, dz);
     if (mv > 1e-4 && !a.done) { const want = Math.atan2(-dz, dx); let d = want - g.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); g.rotation.y += d * Math.min(1, dt / 90); }

@@ -6,7 +6,7 @@ at the same time with the strategy bot each ant was trained on (ant/bots.py), so
 a race to show without any Pis or models. Each move posts the bot's line to the harness port, exactly
 like ant/pi_runner.py, so the viewer shows speech and names.
 
-  python3 tools/race.py --size 8 --seed 1234 [--loops 0.1] [--ants NoMoe,Harry,Curlee] [--pace 0.6]
+  python3 tools/race.py --size 8 --seed 1234 [--loops 0.1] [--ants Mooore,Harry,Curlee] [--pace 0.6]
 
 Where:  --admin URL      keeper admin port   (or $ARENA_ADMIN, default http://127.0.0.1:7342)
         --house URL      contestant port     (default http://127.0.0.1:7341)
@@ -97,12 +97,12 @@ def main(argv=None):
     ap.add_argument("--size", type=int, default=8)
     ap.add_argument("--loops", type=float, default=0.0)
     ap.add_argument("--seed", type=int, default=None)
-    ap.add_argument("--ants", default=",".join(P.NAMES), help="comma-separated: NoMoe,Harry,Curlee")
+    ap.add_argument("--ants", default=",".join(P.NAMES), help="comma-separated: Mooore,Harry,Curlee")
     ap.add_argument("--pace", type=float, default=0.6, help="seconds between moves (default 0.6)")
     ap.add_argument("--max-moves", type=int, default=600)
     a = ap.parse_args(argv)
     a.max_turns = a.max_moves * 2
-    ants = [x.strip() for x in a.ants.split(",") if x.strip()]
+    ants = [P.canonical(x.strip()) for x in a.ants.split(",") if x.strip()]
     bad = [x for x in ants if x not in P.NAMES]
     if bad:
         sys.exit(f"unknown ant(s) {', '.join(bad)}; choose from {', '.join(P.NAMES)}")

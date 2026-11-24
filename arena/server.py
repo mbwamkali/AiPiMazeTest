@@ -4,6 +4,7 @@ Contestant port (open to the runner's machine):
   GET  /v1/room                       the room the session stands in
   POST /v1/walk   {"to": "<name>"}    go through the door to that room
   GET  /v1/device/notebook[?page=N]   the notebook page as text (the open page by default)
+  GET  /v1/device/notebook?pages=A-B  pages A to B in one request -> {"screens": [...]}, each exactly what ?page=N gives
   POST /v1/device/notebook {"line": "<command>"}   one line into the notebook -> reply and open page
   POST /v1/wall   {"text": "<line>"}  write one line on this room's walls (costs a turn) -> reply and the room
 Admin port (signed requests only; firewalled from the runner's machine):
@@ -40,7 +41,7 @@ from .rulebook import RuleError
 from .runs import Store
 
 NOT_FOUND = b'{"error":"not found"}'
-DEVICE_PATH = re.compile(r"^/v1/device/(notebook)(?:\?page=(\d{1,4}))?$")
+DEVICE_PATH = re.compile(r"^/v1/device/(notebook)(?:\?page=(\d{1,4})|\?pages=(\d{1,4})-(\d{1,4}))?$")
 RUN_PATH = re.compile(r"^/admin/runs/([0-9A-Za-z-]+)(/[a-z/]+)?$")
 
 
@@ -83,6 +84,7 @@ class _Base(BaseHTTPRequestHandler):
     server_version = "house"
     sys_version = ""
     protocol_version = "HTTP/1.1"
+    disable_nagle_algorithm = True  # TCP_NODELAY: on a kept-open connection a small reply must not wait ~40 ms for an ACK
     keeper = None  # set on the subclass made by serve()
 
     def version_string(self):
@@ -129,6 +131,8 @@ class ContestantHandler(_Base):
         run = self._run() if known else None
         if not run:
             return self._404("contestant" if known else "path")
+        if dev and dev.group(3):
+            return self._send(200, run.device_view_range(dev.group(1), int(dev.group(3)), int(dev.group(4))))
         if dev:
             return self._send(200, run.device_view(dev.group(1), int(dev.group(2)) if dev.group(2) else None))
         self._send(200, run.room_view())
@@ -139,7 +143,7 @@ class ContestantHandler(_Base):
         except ValueError:
             return self._404("body")
         dev = DEVICE_PATH.match(self.path)
-        if dev and dev.group(2):
+        if dev and (dev.group(2) or dev.group(3)):
             dev = None
         known = self.path in ("/v1/walk", "/v1/wall") or bool(dev)
         run = self._run() if known else None

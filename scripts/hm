@@ -260,7 +260,8 @@ def ant_bundle(hm, python, app, cfg):
         lines.append(f"    {c!r}: {{" + ", ".join(f"{k!r}: {t.__name__}" for k, t in config.SCHEMA[c].items()) + "},")
     lines += ["}", f"REQUIRED = {({c: config.REQUIRED[c] for c in ANT_COMPONENTS})!r}",
               f"PATH_KEYS = {set(k for c in ANT_COMPONENTS for k in config.SCHEMA[c] if k in config.PATH_KEYS)!r}",
-              f"CHOICES = {({k: v for k, v in config.CHOICES.items() if k[0] in ANT_COMPONENTS})!r}", ""]
+              f"CHOICES = {({k: v for k, v in config.CHOICES.items() if k[0] in ANT_COMPONENTS})!r}",
+              f"ALIASES = {({k: v for k, v in config.ALIASES.items() if k[0] in ANT_COMPONENTS})!r}", ""]
     out["hypermaze/schema.py"] = "\n".join(lines).encode()
     for name, desc, args, restart, wants, boot in UNITS["ant"]:
         out[f"units/{name}.service"] = hm.unit_text("ant", name, desc, args, restart, wants, boot,

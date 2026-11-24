@@ -5,7 +5,7 @@ becomes the v2 numbered-door view; the "Last action" line is worked out from the
 alone, the same way as in training. With --report, each turn's line is also posted to the
 report URL (signed with $HARNESS_KEY).
 
-    HOUSE_TOKEN=<run token> HARNESS_KEY=<key> python3 -m ant.pi_runner --persona NoMoe \
+    HOUSE_TOKEN=<run token> HARNESS_KEY=<key> python3 -m ant.pi_runner --persona Mooore \
         --house http://127.0.0.1:7341 --report http://127.0.0.1:7343 --run <run id> \
         --llm http://127.0.0.1:8095
 
@@ -76,7 +76,7 @@ def main(argv=None):
     from hypermaze import config
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", help="settings file (default ~/hypermaze/config/ant.toml if it exists)")
-    ap.add_argument("--persona", choices=P.NAMES, help="default NoMoe")
+    ap.add_argument("--persona", choices=P.NAMES + tuple(P.ALIASES), help="default Mooore")
     ap.add_argument("--house", help="the house URL (default http://127.0.0.1:7341)")
     ap.add_argument("--llm", help="the ant's llama-server (default http://127.0.0.1:8095)")
     ap.add_argument("--report", help="report URL (key in $HARNESS_KEY or harness_key_file)")
@@ -86,7 +86,7 @@ def main(argv=None):
     ap.add_argument("--max-turns", type=int, help="default 600")
     a = ap.parse_args(argv)
     cfg = config.load_or_exit("ant", a.config)
-    a.persona = config.pick(a.persona, None, cfg, "persona", "NoMoe")
+    a.persona = P.canonical(config.pick(a.persona, None, cfg, "persona", "Mooore"))
     a.house = config.pick(a.house, None, cfg, "house", "http://127.0.0.1:7341")
     a.llm = config.pick(a.llm, None, cfg, "llm", "http://127.0.0.1:8095")
     a.report = config.pick(a.report, None, cfg, "report")

@@ -33,6 +33,9 @@ class LocalHouse:
     def read(self, page=None):
         return self.run.device_view("notebook", page)["screen"]
 
+    def read_pages(self, first, last):
+        return self.run.device_view_range("notebook", first, last)["screens"]
+
     def write(self, line):
         return self.run.device_input("notebook", line)["reply"]
 

@@ -15,7 +15,7 @@ from .lessons import maze_mix, room_screen
 from .personas import NAMES, messages
 
 SAY = {
-    "NoMoe": {
+    "Mooore": {
         "goal": ["Way Out, right there. Follow me, nobody dawdle.", "There's the exit. I knew it all along.",
                  "Way Out! Told you I'd find it."],
         "new": ["{to}, you're next. Out of my way.", "I'm taking {to}. No arguments.",
@@ -79,7 +79,7 @@ def decide(persona, g, last, rng):
             return names[rng.choice(seen)], "barge"
     if new:
         kind = "new_more" if len(new) > 1 else "new"
-        if persona == "NoMoe":
+        if persona == "Mooore":
             return names[new[-1]], kind
         if persona == "Curlee":
             return names[rng.choice(new)], kind

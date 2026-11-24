@@ -20,7 +20,7 @@ the optional TOML settings files need Python 3.11+.
 ### The ants (`ant/`)
 
 - `personas.py` – three ants sharing one model, each with its own strategy and voice:
-  **NoMoe** (bossy, always takes the last new door), **Harry** (a worrier who sometimes loses its
+  **Mooore** (bossy, always takes the last new door), **Harry** (a worrier who sometimes loses its
   nerve and steps back) and **Curlee** (chaos: random doors, barges into known rooms).
 - `lessons.py`, `compact.py` – a strategy bot plays thousands of mazes and every move becomes a
   training example (screen → short reason + `GO:` line). `compact.py` is the faster v2 format:
@@ -135,7 +135,7 @@ The fake LLM speaks the general harness's format only; `ant.pi_runner` needs the
 With that model and `llama-server` built, `scripts/run-ant.sh` does a whole ant run:
 
 ```bash
-MODEL=/path/to/ant-Q4_0.gguf KEYS_FILE=hypermaze-keeper-data/keys.json scripts/run-ant.sh NoMoe 2 8 7
+MODEL=/path/to/ant-Q4_0.gguf KEYS_FILE=hypermaze-keeper-data/keys.json scripts/run-ant.sh Mooore 2 8 7
 ```
 
 ## Across machines

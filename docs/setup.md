@@ -155,7 +155,7 @@ with `ant.pi_runner` and stops the server. Starting a run needs the admin key (`
 
 ```bash
 llama.cpp/build/bin/llama-server -m "$MODEL" -t 4 -c 4096 -np 1 --jinja --host 127.0.0.1 --port 8095 &
-HOUSE_TOKEN=<token> HARNESS_KEY=$(cat /path/to/harness.key) python3 -m ant.pi_runner --persona NoMoe \
+HOUSE_TOKEN=<token> HARNESS_KEY=$(cat /path/to/harness.key) python3 -m ant.pi_runner --persona Mooore \
   --house http://<keeper-host>:7341 --report http://<keeper-host>:7343 --run <run id>
 ```
 

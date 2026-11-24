@@ -21,4 +21,6 @@ REQUIRED = {"keeper": (), "viewer": (), "runner": (), "ant": ("model",)}
 PATH_KEYS = {"data", "tls_cert", "tls_key", "keys_file", "page", "ca_cert", "token_file", "model",
              "llama_server", "harness_key_file", "run_file"}
 CHOICES = {("runner", "mode"): ("none", "notes", "notebook"),
-           ("ant", "persona"): ("NoMoe", "Harry", "Curlee")}
+           ("ant", "persona"): ("Mooore", "Harry", "Curlee")}
+# Old values still accepted and read as their new ones (Mooore was called NoMoe until November 2026).
+ALIASES = {("ant", "persona"): {"NoMoe": "Mooore"}}
