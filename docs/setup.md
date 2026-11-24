@@ -150,7 +150,7 @@ Instead of long command lines, each machine can keep one TOML file per component
 |---|---|---|
 | keeper | `keeper.toml` | `python3 -m arena serve` / `python3 -m arena keys` |
 | viewer | `viewer.toml` | `python3 -m arena.viewer` |
-| runner | `runner.toml` | `runner/house.py` |
+| runner | any path, given with `--config` or `$HOUSE_CONFIG` (no default location) | `runner/house.py` |
 | ant | `ant.toml` | `python3 -m ant.llm_server` (llama-server) and `python3 -m ant.pi_runner` |
 
 Start from the commented examples in `config/*.example.toml`. Each entry point reads its default

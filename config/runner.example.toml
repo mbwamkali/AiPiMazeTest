@@ -1,21 +1,17 @@
-# Runner settings for runner/house.py: runner/house.py --config ~/hypermaze/config/runner.toml
-# Copy to ~/hypermaze/config/runner.toml and uncomment what you need.
+# Settings for the player's interface (runner/house.py): house.py --config <file>, or set $HOUSE_CONFIG.
+# The interface shows only the room the player stands in and its doors. Keep this file and house.py
+# in a neutral folder on the player's machine: nothing else from this project belongs there.
 # Precedence: command-line flag > environment variable > this file > built-in default.
 # Never put the run token in this file: only the path to a file that holds it.
 
-# The keeper's contestant URL ($HOUSE_SERVER and --server win over this).
-# server = "https://<keeper-host>:7341"
+# The house's address ($HOUSE_SERVER and --server win over this).
+# server = "https://<house-host>:7341"
 
-# CA certificate that signed the keeper's TLS certificate ($SSL_CERT_FILE wins over this).
-# ca_cert = "~/hypermaze/ca.crt"
+# CA certificate that signed the house's TLS certificate ($SSL_CERT_FILE wins over this).
+# ca_cert = "~/player/ca.crt"
 
 # File whose first line is the run token ($HOUSE_TOKEN and --token win over this).
-# token_file = "~/hypermaze/run.token"
+# token_file = "~/player/run.token"
 
-# none, notes or notebook (--notes / --notebook win over this).
-# mode = "notes"
-
-# Notebook size and screen width.
-# pages = 100
-# lines = 35
-# width = 60
+# none or notebook (--notebook wins over this). The notebook is kept by the house, one line at a time.
+# mode = "notebook"

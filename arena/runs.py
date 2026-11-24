@@ -2,7 +2,7 @@
 
 Each run is a folder <data>/runs/<run_id>/ with
   run.json      settings, rulebook and its fingerprint, token hash
-  events.jsonl  append-only: start, walk, edit, refused, message, harness, end
+  events.jsonl  append-only: start, walk, edit, refused, message, harness, device, end
 The state (position, visits, the maze with its edits) is rebuilt by replaying events.jsonl,
 so a keeper restart picks up runs where they were.
 """
@@ -15,6 +15,7 @@ import time
 
 from hypermaze.core import Maze
 from . import rulebook as rules
+from .notebook import Notebook
 from .world import World, EditRefused
 
 DEFAULT_FAREWELL = "The lights go out. The game is over."
@@ -46,6 +47,7 @@ class Run:
         self.pending = []           # in-world messages for the next screen
         self.ended = None           # None | way_out | exhausted | stopped
         self.farewell = None
+        self.notebook = Notebook()  # the player's notebook: only what the player writes
         self.events = []
         self.lock = threading.RLock()
         self.cond = threading.Condition(self.lock)
@@ -74,8 +76,11 @@ class Run:
 
     # ---- contestant -----------------------------------------------------------------
     def room_view(self):
+        """What the player is told: this room's name and its doors, nothing about the house's shape.
+        Doors come in alphabetical order so their order gives no direction away."""
         with self.lock:
-            v = self.world.view(self.cur)
+            w = self.world.view(self.cur)
+            v = {"room": w["room"], "doors": sorted(w["doors"], key=lambda d: (d.lower(), d))}
             v.update(turn=self.moves, messages=self.pending, ended=self.ended)
             if self.ended:
                 v.update(self._end_info())
@@ -84,8 +89,6 @@ class Run:
 
     def _end_info(self):
         info = {"moves": self.moves}
-        if self.ended == "way_out":
-            info["shortest"] = self.settings["shortest"]
         if self.ended == "stopped":
             info["farewell"] = self.farewell
         return info
@@ -160,6 +163,25 @@ class Run:
             return {"status": "applied", "summary": plan.summary, "map_version": self.world.version,
                     "touches_seen": seen_hit}
 
+    # ---- devices (the notebook) ------------------------------------------------------
+    def device_view(self, name, page=None):
+        """The device's screen. Reading changes nothing, so it is not an event."""
+        if name != "notebook":
+            raise LookupError("no_device")
+        with self.lock:
+            return {"screen": self.notebook.view(page)}
+
+    def device_input(self, name, line, write=True):
+        """One line typed into the device. Logged (so the Colosseum can watch), never costs a move."""
+        if name != "notebook":
+            raise LookupError("no_device")
+        with self.lock:
+            reply = self.notebook.input(line)
+            self._emit({"t": "device", "device": name, "input": str(line), "reply": reply,
+                        "page": self.notebook.open_page + 1, "screen": self.notebook.view(),
+                        "turn": self.moves}, write)
+            return {"reply": reply, "screen": self.notebook.view()}
+
     # ---- harness --------------------------------------------------------------------
     def harness(self, data, write=True):
         with self.lock:
@@ -208,6 +230,8 @@ class Store:
                 run.walk(run.world.names[ev["to"]])
             elif t == "edit":
                 run.try_edit(ev["edit"], ev.get("by", "director"), ev.get("why", ""))
+            elif t == "device":
+                run.device_input(ev["device"], ev["input"])
             elif t == "end" and not run.ended:
                 run.stop(ev.get("farewell"))
                 run.ended = ev["result"]

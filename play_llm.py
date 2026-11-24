@@ -26,7 +26,9 @@ ap.add_argument("--speed-log", default="speed.log")
 ap.add_argument("--game", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "maze.py"),
                 help="game program (a .py file runs with this Python; a command line is split like a shell)")
 ap.add_argument("--max-unusable", type=int, default=50, help="stop after this many replies in a row with no usable move")
-ap.add_argument("--mode", choices=["notes", "notebook", "none"], default="notes", help="notes: game keeps notes; notebook: model writes its own; none: memory only")
+ap.add_argument("--mode", choices=["notes", "notebook", "none"], default=None,
+                help="notes (offline game only): game keeps notes; notebook: model writes its own; none: memory only. "
+                     "Default notes offline, none with --house")
 ap.add_argument("--house", help="keeper contestant URL: play runner/house.py (token in $HOUSE_TOKEN)")
 ap.add_argument("--report", help="keeper harness URL: post each turn there (key in $HARNESS_KEY)")
 ap.add_argument("--run", help="run id for --report")
@@ -34,6 +36,10 @@ ap.add_argument("maze_args", nargs="*")
 a = ap.parse_args()
 if a.report and not (a.run and os.environ.get("HARNESS_KEY")):
     ap.error("--report needs --run and $HARNESS_KEY")
+if a.mode is None:
+    a.mode = "none" if a.house else "notes"
+if a.house and a.mode == "notes":
+    ap.error("--mode notes is the offline game only: the house shows nothing but the current room (use notebook or none)")
 
 mode_flags = {"notes": ["--notes"], "notebook": ["--notebook"], "none": []}[a.mode]
 child_env = {k: v for k, v in os.environ.items() if k != "HARNESS_KEY"}
