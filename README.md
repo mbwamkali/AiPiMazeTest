@@ -13,8 +13,8 @@ the optional TOML settings files need Python 3.11+.
 | Part | Code | What it does |
 |---|---|---|
 | **Map keeper** | `arena/` (`python3 -m arena serve`) | Holds the whole maze, the run's rulebook and every run's event log. Hands each contestant only its current room. Admins can watch, talk into the game, edit the maze under rules, or stop a run. |
-| **Colosseum viewer** | `arena/viewer.py` + `viewer/colosseum.html` | A web relay and the 3D Colosseum: the maze as a lit board in a stadium with a crowd, every ant of a race at once with its footprints and spoken lines, ant cams, a replay timeline with highlights, and saved matches. The flat grid view is still at `/flat`. It signs keeper calls itself so the admin key never reaches a browser; it only reads from the keeper. |
-| **The house** | `runner/house.py` | The text game the ants talk to. It asks the keeper for each room and prints the same screens as the offline game (`maze.py`). |
+| **Colosseum viewer** | `arena/viewer.py` + `viewer/index.html` | A read-only web relay and page: the maze as a flat grid, the ant's trail, its spoken lines, distance to the exit over time. It signs keeper calls itself so the admin key never reaches a browser. |
+| **The house** | `runner/house.py` | The player's whole interface: the room it stands in and that room's doors (alphabetical), plus an optional notebook the keeper stores. Nothing about the maze's shape, by design: see *The blind interface* below. It imports nothing from this project, so a player machine needs only this file. |
 | **The LLMs** | `ant/`, `play_llm.py` | The ants and the harness that drives them (below). |
 
 ### The ants (`ant/`)
@@ -30,6 +30,9 @@ the optional TOML settings files need Python 3.11+.
 - `score.py` – plays held-out mazes and compares the model with the bot.
 - `pi_runner.py` – plays one live run through the keeper on a Pi, using a local `llama-server`,
   and posts each turn to the keeper so the viewer can show what the ant said.
+- `notes.py` – the ant's memory. The house tells the ant nothing but its current room, so the ant
+  writes every room's doors and every move into its notebook on the keeper, reads its pages back
+  each turn and works out from them alone which doors it has tried. The viewer shows the notebook.
 
 `play_llm.py` is the general harness for a larger model behind `llama-server` (any OpenAI-style
 chat endpoint): it plays the offline game or, with `--house`, a keeper run.
@@ -37,6 +40,17 @@ chat endpoint): it plays the offline game or, with `--house`, a keeper run.
 **Model.** The quantised Pi ant model (a Q4_0 `.gguf`) will be published on this repo's GitHub
 Releases page, not in the repository itself. It is a fine-tune of Qwen/Qwen3-0.6B, which is
 licensed Apache-2.0.
+
+### The blind interface (hard rule)
+
+A player, whether an ant or a larger model, sees the maze only through `runner/house.py` and the
+keeper's contestant port. That interface lists the current room and the doors out of it, each door
+labelled with the room it leads to, in alphabetical order. Nothing else: no size, shape, coordinates,
+directions, distances, room counts, shortest route or ready-made notes. Everything a player remembers
+is in its own context or in its notebook. The keeper stores the notebook so the Colosseum can watch it,
+but the notebook is plain paper: it returns only what the player wrote and treats any text the same.
+`house.py` imports nothing from this project, so a player's machine needs only that one file (and
+should hold nothing else from this repository). `tests/test_arena.py` checks all of this.
 
 ## Ports
 
@@ -88,7 +102,7 @@ Play it with the fake LLM (it answers like a sloppy model, so expect a long walk
 
 ```bash
 HOUSE_TOKEN=<token> HARNESS_KEY=$(python3 -c "import json;print(json.load(open('hypermaze-keeper-data/keys.json'))['harness'])") \
-  ./play_llm.py --url http://127.0.0.1:8099/v1/chat/completions --mode notes \
+  ./play_llm.py --url http://127.0.0.1:8099/v1/chat/completions --mode notebook \
   --house http://127.0.0.1:7341 --report http://127.0.0.1:7343 --run <run id>
 ```
 

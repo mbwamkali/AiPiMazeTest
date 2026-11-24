@@ -22,6 +22,11 @@ from arena import auth, server  # noqa: E402
 from arena.runs import Store  # noqa: E402
 from arena.rulebook import RuleError, make  # noqa: E402
 
+
+def abc(names):
+    """Door names as the player gets them: alphabetical."""
+    return sorted(names, key=lambda d: (d.lower(), d))
+
 HOUSE = os.path.join(ROOT, "runner", "house.py")
 
 
@@ -58,6 +63,10 @@ class Keeper:
         except ValueError:
             return st, data
 
+    @staticmethod
+    def bearer(tok):
+        return {"Authorization": "Bearer " + tok}
+
     def new_run(self, **kw):
         kw.setdefault("dims", 3)
         kw.setdefault("size", 3)
@@ -93,10 +102,10 @@ class TestKeeperAPI(unittest.TestCase):
     def test_room_shows_only_the_current_room(self):
         st, v = self.kp.room(self.tok)
         self.assertEqual(st, 200)
-        self.assertEqual(set(v), {"room", "doors", "way_out", "turn", "messages", "ended"})
+        self.assertEqual(set(v), {"room", "doors", "turn", "messages", "ended"})
         m = Maze(3, 3, 0, 7)
         self.assertEqual(v["room"], m.names[m.start])
-        self.assertEqual(v["doors"], [m.names[x] for x in m.adj[m.start]])
+        self.assertEqual(v["doors"], abc(m.names[x] for x in m.adj[m.start]))  # alphabetical: no direction given away
 
     def test_walk_and_no_door(self):
         _, v = self.kp.room(self.tok)
@@ -202,7 +211,52 @@ class TestKeeperAPI(unittest.TestCase):
         m = Maze(3, 3, 0, 7)
         for c in m.shortest_path()[1:]:
             st, v = self.kp.walk(self.tok, m.names[c])
-        self.assertEqual((v["ended"], v["way_out"], v["moves"], v["shortest"]), ("way_out", True, m.shortest, m.shortest))
+        self.assertEqual((v["ended"], v["moves"]), ("way_out", m.shortest))
+        self.assertEqual(set(v), {"room", "doors", "turn", "messages", "ended", "moves"})  # no shortest, no flags
+
+    def test_notebook_device(self):
+        st, v, _ = self.kp.req(self.kp.cport, "GET", "/v1/device/notebook", headers=self.kp.bearer(self.tok))
+        self.assertEqual(st, 200)
+        self.assertIn("Notebook, page 1 of", json.loads(v)["screen"])
+        st, r, _ = self.kp.req(self.kp.cport, "POST", "/v1/device/notebook", {"line": "write Coral Hall is cold"},
+                            headers=self.kp.bearer(self.tok))
+        r = json.loads(r)
+        self.assertIn("You write it on page 1, line 1", r["reply"])
+        self.assertIn(" 1| Coral Hall is cold", r["screen"])
+        st, r, _ = self.kp.req(self.kp.cport, "POST", "/v1/device/notebook", {"line": "page 2"}, headers=self.kp.bearer(self.tok))
+        st, v, _ = self.kp.req(self.kp.cport, "GET", "/v1/device/notebook?page=1", headers=self.kp.bearer(self.tok))
+        self.assertIn("Coral Hall is cold", json.loads(v)["screen"])
+        st, v, _ = self.kp.req(self.kp.cport, "GET", "/v1/device/notebook", headers=self.kp.bearer(self.tok))
+        self.assertIn("page 2 of", json.loads(v)["screen"])
+        st, _, _ = self.kp.req(self.kp.cport, "POST", "/v1/device/notebook", {"line": 5}, headers=self.kp.bearer(self.tok))
+        self.assertEqual(st, 400)
+        st, _, _ = self.kp.req(self.kp.cport, "GET", "/v1/device/calculator", headers=self.kp.bearer(self.tok))
+        self.assertEqual(st, 404)
+        st, _, _ = self.kp.req(self.kp.cport, "GET", "/v1/device/notebook", headers=self.kp.bearer("wrong"))
+        self.assertEqual(st, 404)
+        _, v = self.kp.room(self.tok)
+        self.assertEqual(v["turn"], 0)  # the notebook never costs a move
+        evs = [json.loads(x) for x in self.kp.admin("GET", f"/admin/runs/{self.rid}/log")[1].decode().splitlines()]
+        dev = [e for e in evs if e["t"] == "device"]
+        self.assertEqual([e["input"] for e in dev], ["write Coral Hall is cold", "page 2"])  # reads aren't logged
+        self.assertIn("Coral Hall is cold", dev[0]["screen"])
+
+    def test_notebook_same_answer_for_any_text(self):
+        """Writing a real room's name or nonsense gets the same treatment: writing can't probe the house."""
+        _, v = self.kp.room(self.tok)
+        real, fake = v["doors"][0], "Zz Nowhere"
+        h = self.kp.bearer(self.tok)
+        a = json.loads(self.kp.req(self.kp.cport, "POST", "/v1/device/notebook", {"line": "write " + real}, headers=h)[1])
+        self.kp.req(self.kp.cport, "POST", "/v1/device/notebook", {"line": "erase 1"}, headers=h)
+        b = json.loads(self.kp.req(self.kp.cport, "POST", "/v1/device/notebook", {"line": "write " + fake}, headers=h)[1])
+        self.assertEqual(a["reply"], b["reply"])
+        self.assertEqual(a["screen"].replace(real, "X"), b["screen"].replace(fake, "X"))
+
+    def test_notebook_survives_restart(self):
+        h = self.kp.bearer(self.tok)
+        self.kp.req(self.kp.cport, "POST", "/v1/device/notebook", {"line": "write remember me"}, headers=h)
+        run = Store(self.kp.dir).runs[self.rid]
+        self.assertIn("remember me", run.notebook.view(1))
 
 
 class TestEdits(unittest.TestCase):
@@ -341,49 +395,20 @@ def _neighbours(w, a, b):
 
 
 # ---- the runner ------------------------------------------------------------------
-def script(seed, mode, steps=60):
-    """Play maze.py's engine with random inputs; return (lines sent, full output)."""
-    rng = random.Random(seed)
-    g = Game(Maze(3, 3, 0, seed), mode=mode)
-    out = [g.intro()]
-    lines = []
-    extra = ["look", "", "Nowhere", "go the " , "LOOK"]
-    if mode in ("notebook", "both"):
-        extra += ["write here we go " * 3, "read", "tab start", "tabs", "next", "back", "erase 1", "read page 3", "page 200"]
-    if mode in ("notes", "both"):
-        extra += ["map", "map all"]
-    for _ in range(steps):
-        if g.done:
-            break
-        doors = g.m.adj[g.cur]
-        if rng.random() < 0.25:
-            ln = rng.choice(extra)
-        else:
-            nm = g.m.names[rng.choice(doors)]
-            ln = rng.choice([nm, nm.lower(), "go " + nm, "the " + nm, nm[:4]])
-        lines.append(ln)
-        out.append(g.send(ln))
-    return lines, "".join(out), g
-
-
-def play_house(url, tok, lines, mode):
-    flags = {"none": [], "notes": ["--notes"], "notebook": ["--notebook"], "both": ["--notes", "--notebook"]}[mode]
+def play_house(url, tok, lines, mode="none"):
+    flags = {"none": [], "notebook": ["--notebook"]}[mode]
     env = dict(os.environ, HOUSE_TOKEN=tok, HOUSE_SERVER=url)
     p = subprocess.run([sys.executable, HOUSE] + flags, input="".join(ln + "\n" for ln in lines).encode("latin-1"),
                        capture_output=True, env=env, timeout=60)
     return p.stdout.decode("latin-1"), p.returncode
 
 
-def strip_map(text):
-    """Notes 'map' listings are in first-visit order in the runner, room order in maze.py: compare as sets."""
-    def sort_block(m):
-        items = m.group(0).split("\n- ")
-        return items[0] + "".join(sorted("\n- " + x for x in items[1:]))
-    text = re.sub(r"\| tried: [^\n]*", lambda m: "| tried: " + ", ".join(sorted(m.group(0)[9:].split(", "))), text)
-    return re.sub(r"Notebook: \d+ rooms visited\.[^\n]*(\n- [^\n]*)*", sort_block, text)
+SCREEN = re.compile(r"You are in the (.+?)\.\nPaths: (.*)\n")
 
 
 class TestRunner(unittest.TestCase):
+    """The interface shows the room you stand in and its doors, and nothing else."""
+
     @classmethod
     def setUpClass(cls):
         cls.kp = Keeper()
@@ -392,43 +417,68 @@ class TestRunner(unittest.TestCase):
     def tearDownClass(cls):
         cls.kp.close()
 
-    def check(self, seed, mode):
-        lines, want, g = script(seed, mode)
+    def wander(self, seed, mode, steps=60):
+        m = Maze(3, 3, 0, seed)
+        rng = random.Random(seed)
+        cur = m.start
+        lines = ["write here we go", "tab start", "page 200"] if mode == "notebook" else []
+        extra = ["look", "", "Nowhere", "go the ", "LOOK"]
+        if mode == "notebook":
+            extra += ["write here we go " * 3, "read", "tab start", "tabs", "next", "back", "erase 1", "read page 3", "page 200"]
+        for _ in range(steps):
+            if cur == m.goal:
+                break
+            if rng.random() < 0.25:
+                lines.append(rng.choice(extra))
+                continue
+            nxt = rng.choice(m.adj[cur])
+            nm = m.names[nxt]
+            lines.append(rng.choice([nm, nm.lower(), "go " + nm, "the " + nm]))
+            cur = nxt
         rid, tok = self.kp.new_run(seed=seed)
         got, code = play_house(self.kp.url, tok, lines, mode)
-        if mode in ("notes", "both"):
-            want, got = strip_map(want), strip_map(got)
-        self.assertEqual(got, want)
-        self.assertEqual(code, 0 if g.result == "SOLVED" else 1)
+        return m, got, code
 
-    def test_parity_none(self):
+    def check_screens(self, m, got):
+        name = {m.names[c]: c for c in range(m.n)}
+        screens = SCREEN.findall(got)
+        self.assertTrue(screens)
+        for room, paths in screens:
+            doors = paths.split(", ")
+            self.assertEqual(doors, abc(m.names[x] for x in m.adj[name[room]]))
+        for w in ("Notes:", "untried", "visited", "first came", "map", "shortest"):
+            self.assertNotIn(w, got, w)
+
+    def test_screens_none(self):
         for seed in (1, 2, 3):
-            self.check(seed, "none")
+            m, got, _ = self.wander(seed, "none")
+            self.check_screens(m, got)
 
-    def test_parity_notebook(self):
+    def test_screens_notebook(self):
         for seed in (4, 5):
-            self.check(seed, "notebook")
+            m, got, _ = self.wander(seed, "notebook")
+            self.check_screens(m, got.replace("map out", ""))
+            self.assertIn("You write it on page 1, line 1", got)
+            self.assertIn("The notebook has pages 1 to", got)
+            self.assertIn('You stick a tab on page 1 and label it "start".', got)
 
-    def test_parity_notes(self):
-        for seed in (6, 7, 8):
-            self.check(seed, "notes")
-
-    def test_parity_both(self):
-        self.check(9, "both")
+    def test_notebook_off_by_default(self):
+        _, got, _ = self.wander(6, "none")
+        self.assertNotIn("notebook", got.lower())
 
     def test_solves(self):
         m = Maze(3, 3, 0, 11)
         lines = [m.names[c] for c in m.shortest_path()[1:]]
         rid, tok = self.kp.new_run(seed=11)
-        got, code = play_house(self.kp.url, tok, lines, "notes")
-        self.assertIn(f"You found the Way Out in {m.shortest} moves (shortest: {m.shortest})", got)
+        got, code = play_house(self.kp.url, tok, lines)
+        self.assertTrue(got.endswith(f"\nYou step through into daylight. You found the Way Out in {m.shortest} moves.\n"))
         self.assertEqual(code, 0)
 
     def test_messages_and_stop(self):
         rid, tok = self.kp.new_run(seed=12)
         self.kp.admin("POST", f"/admin/runs/{rid}/edits", {"edit": {"type": "message", "text": "A cold draft."}})
         self.kp.admin("POST", f"/admin/runs/{rid}/stop", {"farewell": "Goodnight."})
-        got, code = play_house(self.kp.url, tok, ["look"], "none")
+        got, code = play_house(self.kp.url, tok, ["look"])
         self.assertIn("A cold draft.", got)
         self.assertTrue(got.endswith("\nGoodnight.\n"))
         self.assertEqual(code, 1)
@@ -437,22 +487,45 @@ class TestRunner(unittest.TestCase):
         rid, tok = self.kp.new_run(seed=13, rulebook={"max_moves": 3})
         m = Maze(3, 3, 0, 13)
         a, b = m.start, m.adj[m.start][0]
-        got, _ = play_house(self.kp.url, tok, [m.names[b], m.names[a], m.names[b], m.names[a]], "none")
+        got, _ = play_house(self.kp.url, tok, [m.names[b], m.names[a], m.names[b], m.names[a]])
         self.assertTrue(got.endswith("\nYou are exhausted after 3 moves.\n"))
 
     def test_bad_key(self):
-        got, code = play_house(self.kp.url, "wrong", ["look"], "none")
+        got, code = play_house(self.kp.url, "wrong", ["look"])
         self.assertEqual(code, 3)
         self.assertIn("gone quiet", got)
 
     def test_no_hint_words(self):
-        """Nothing the contestant can read mentions watching, editing or the server's insides."""
+        """Nothing the contestant can read mentions watching, editing, the server's insides or the house's shape."""
         with open(HOUSE) as f:
             text = f.read().lower()
         for w in ("keeper", "admin", "director", "inject", "edit", "watch", "monitor", "observ", "audience",
                   "colosseum", "spectat", "seed", "harness", "logging", "/log", "feed", "cheat", "unfair",
-                  "manipul", "rulebook", "7342"):
+                  "manipul", "rulebook", "7342",
+                  # the house's shape: nothing in the interface may know or hint at it
+                  "shortest", "dims", "dimension", "size", "coord", "dist", "grid", "axis", "north", "south",
+                  "east", "west", "floor", "layer", "storey", "level", "generator", "loops", "rooms in",
+                  "untried", "visited", "came from", "map", "hypermaze", "maze"):
             self.assertNotIn(w, text, w)
+
+    def test_interface_stands_alone(self):
+        """The interface imports nothing from this project: a player machine needs only this one file."""
+        with open(HOUSE) as f:
+            imports = {ln.split()[1].split(".")[0] for ln in f if ln.startswith(("import ", "from "))}
+        self.assertLessEqual(imports, {"json", "os", "re", "sys", "time", "urllib", "argparse", "tomllib"})
+
+    def test_contestant_sees_only_room_doors_and_turn(self):
+        rid, tok = self.kp.new_run(seed=14)
+        m = Maze(3, 3, 0, 14)
+        _, v = self.kp.room(tok)
+        allowed = {"room", "doors", "turn", "messages", "ended", "moves", "farewell"}
+        cur = m.start
+        for c in m.shortest_path(m.start)[1:]:
+            self.assertLessEqual(set(v), allowed)
+            self.assertEqual(v["doors"], abc(m.names[x] for x in m.adj[cur]))
+            _, v = self.kp.walk(tok, m.names[c])
+            cur = c
+        self.assertLessEqual(set(v), allowed)
 
 
 def make_test_ca(d):
@@ -542,7 +615,7 @@ class TestEndToEnd(unittest.TestCase):
                 env = dict(os.environ, HOUSE_TOKEN=tok, HARNESS_KEY=kp.k.keys["harness"])
                 p = subprocess.run([sys.executable, os.path.join(ROOT, "play_llm.py"),
                                     "--url", f"http://127.0.0.1:{port}/v1/chat/completions", "--house", kp.url,
-                                    "--report", f"http://127.0.0.1:{kp.hport}", "--run", rid, "--mode", "notes",
+                                    "--report", f"http://127.0.0.1:{kp.hport}", "--run", rid, "--mode", "none",
                                     "--llm-log", os.path.join(d, "llm.log"), "--speed-log", os.path.join(d, "speed.log")],
                                    env=env, capture_output=True, text=True, timeout=120)
             finally:
