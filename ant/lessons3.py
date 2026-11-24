@@ -37,14 +37,14 @@ def comment(persona, kind, to, rng):
     return rng.choice(lines).format(to=to) if lines else None
 
 
-def games(n, seed_base, rng):
+def games(n, seed_base, rng, briefing="team"):
     for i in range(n):
         dims, size, loops, gen = maze_mix(rng)
         maze = Maze(dims, size, loops, seed=seed_base + i, generator=gen)
         ants = rng.choice([1, 1, 2, 2, 3, 3, 3])
         mix = rng.choices([m for m, _ in MIXES], [w for _, w in MIXES])[0]
         pen = rng.choice([200000] * 6 + [20000, 5000])
-        yield RelayGame(maze, ants=ants, mix=mix, seed=seed_base + i, pen_ink=pen)
+        yield RelayGame(maze, ants=ants, mix=mix, seed=seed_base + i, pen_ink=pen, briefing=briefing)
 
 
 def main(argv=None):
@@ -55,12 +55,14 @@ def main(argv=None):
     ap.add_argument("--quiet-share", type=float, default=0.25)
     ap.add_argument("--wrong", type=float, default=0.04)
     ap.add_argument("--chatty", type=float, default=0.08)
+    ap.add_argument("--briefing", choices=["team", "size", "none"], default="team",
+                    help="what an ant is told about its team as it comes in (see ant/relay3.py)")
     a = ap.parse_args(argv)
     rng = random.Random(a.seed_base)
     n = talk = 0
     kinds = {}
     with open(a.out, "w") as f:
-        for g in games(a.games, a.seed_base, rng):
+        for g in games(a.games, a.seed_base, rng, a.briefing):
             while not g.done:
                 text, options = g.screen()
                 doors = [v for k, v in options.items() if v[0] == "go"]
