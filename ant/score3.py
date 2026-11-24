@@ -126,7 +126,7 @@ def main(argv=None):
     ap.add_argument("--shapes", choices=["2d", "mix"], default="2d", help="maze shapes when --size is not given")
     ap.add_argument("--walls", choices=sorted(WALLS), help="all games with these walls (default: the lesson mix)")
     ap.add_argument("--briefing", choices=["team", "size", "none"], default="team")
-    ap.add_argument("--teacher", choices=["strict", "strictC", "strictR", "tagged"], default="tagged")
+    ap.add_argument("--teacher", choices=["strict", "strictC", "strictR", "human", "tagged"], default="tagged")
     a = ap.parse_args(argv)
     games = [Game(s, a.quiet, a.briefing, a.teacher) for s in heldout(a.games, a.size, a.walls, a.shapes)]
     t0 = time.time()
