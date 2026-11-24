@@ -326,6 +326,36 @@ class TestKeeperAPI(unittest.TestCase):
         self.assertIn("pages 1 to", h.read_pages(5, 2)[0])
         h.close()
 
+    def test_kept_open_connection_reads_fast(self):
+        """Small replies on a kept-open connection must not stall (~40 ms each) waiting for an ACK."""
+        sys.path.insert(0, os.path.join(ROOT, "runner"))
+        from house import House
+        self._fill(2)
+        h = House(self.kp.url, self.tok)
+        h.read(1)
+        t0 = time.perf_counter()
+        for _ in range(25):
+            h.read(1)
+            h.read(2)
+        self.assertLess(time.perf_counter() - t0, 1.0)   # 50 reads; with the stall this takes 2 s or more
+        h.close()
+
+    def test_reads_logged_without_disk_sync(self):
+        import arena.runs as R
+        synced, real = [], R.os.fsync
+        R.os.fsync = lambda fd: synced.append(fd) or real(fd)
+        try:
+            self._nb("/v1/device/notebook?pages=1-3")
+            self._nb("/v1/device/notebook?page=2")
+            self.assertEqual(synced, [])                   # reads: logged, not synced
+            self.kp.req(self.kp.cport, "POST", "/v1/device/notebook", {"line": "write keep me"},
+                        headers=self.kp.bearer(self.tok))
+            self.assertEqual(len(synced), 1)               # writes still sync
+        finally:
+            R.os.fsync = real
+        run = Store(self.kp.dir).runs[self.rid]
+        self.assertEqual(sum(e["t"] == "device_view" for e in run.events), 2)
+
     def test_notebook_survives_restart(self):
         h = self.kp.bearer(self.tok)
         self.kp.req(self.kp.cport, "POST", "/v1/device/notebook", {"line": "write remember me"}, headers=h)

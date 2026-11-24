@@ -67,13 +67,13 @@ class Run:
         self._replaying = False
 
     # ---- events ---------------------------------------------------------------------
-    def _emit(self, ev, write=True):
+    def _emit(self, ev, write=True, sync=True):
         if self._replaying:  # rebuilding state from events.jsonl: the events are already there
             return ev
         with self.cond:
-            return self._emit_locked(ev, write)
+            return self._emit_locked(ev, write, sync)
 
-    def _emit_locked(self, ev, write):
+    def _emit_locked(self, ev, write, sync=True):
         ev.setdefault("t_wall", round(time.time(), 3))
         ev["seq"] = len(self.events)
         self.events.append(ev)
@@ -82,7 +82,8 @@ class Run:
                 self._file = open(os.path.join(self.dir, "events.jsonl"), "a", encoding="utf-8")
             self._file.write(json.dumps(ev) + "\n")
             self._file.flush()
-            os.fsync(self._file.fileno())
+            if sync:  # reads (device_view) skip the disk sync: losing one in a crash changes no state
+                os.fsync(self._file.fileno())
         self.cond.notify_all()
         return ev
 
@@ -232,7 +233,7 @@ class Run:
             return {"screens": [nb.view(p) for p in pages]}
 
     def _viewed(self, name, pages):
-        self._emit({"t": "device_view", "device": name, "pages": pages, "turn": self.moves})
+        self._emit({"t": "device_view", "device": name, "pages": pages, "turn": self.moves}, sync=False)
 
     def device_input(self, name, line, write=True):
         """One line typed into the device. Logged (so the Colosseum can watch), never costs a move."""

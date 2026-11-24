@@ -84,6 +84,7 @@ class _Base(BaseHTTPRequestHandler):
     server_version = "house"
     sys_version = ""
     protocol_version = "HTTP/1.1"
+    disable_nagle_algorithm = True  # TCP_NODELAY: on a kept-open connection a small reply must not wait ~40 ms for an ACK
     keeper = None  # set on the subclass made by serve()
 
     def version_string(self):
