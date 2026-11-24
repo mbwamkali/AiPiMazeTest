@@ -70,10 +70,16 @@ def run_hf(games, model_dir, batch, max_new, temperature):
     tok = AutoTokenizer.from_pretrained(model_dir)
     tok.padding_side = "left"
     model = AutoModelForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16).to("cuda").eval()
+    t0, last, step = time.time(), 0, 0
     while True:
         act = [g for g in games if g.active][:batch]
         if not act:
             break
+        step += 1
+        if time.time() - last > 60:              # progress for long runs
+            last = time.time()
+            print(f"  [{time.time() - t0:.0f}s] step {step}: {sum(not g.active for g in games)}/{len(games)} games done",
+                  flush=True)
         prompts = [tok.apply_chat_template(g.messages(), tokenize=False, add_generation_prompt=True,
                                            enable_thinking=False) for g in act]
         enc = tok(prompts, return_tensors="pt", padding=True, add_special_tokens=False).to("cuda")
