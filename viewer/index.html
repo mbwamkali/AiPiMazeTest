@@ -328,7 +328,7 @@ async function openRun(id) {
 }
 function connect() {
   const es = new EventSource(withKey(`api/runs/${encodeURIComponent(LIVE.run)}/feed?since=${LIVE.lastSeq + 1}`)); LIVE.es = es;
-  for (const t of ['start', 'harness', 'walk', 'wall', 'edit', 'refused', 'device', 'end']) es.addEventListener(t, onEv);
+  for (const t of ['start', 'harness', 'walk', 'wall', 'say', 'edit', 'refused', 'device', 'end']) es.addEventListener(t, onEv);
   es.onopen = () => badge(LIVE.ended ? 'ended' : 'live', !LIVE.ended);
   es.onerror = () => { if (!LIVE.ended) badge('reconnecting…'); };
 }
@@ -342,6 +342,7 @@ async function onEv(ev) {
   else if (e.t === 'wall') { const k = RUN.path.length - 1; RUN.writes.push({ k, room: e.room, surface: e.surface, intended: e.intended || '', rendered: e.rendered || '' });
     RUN.pen[k] = { ink: e.ink_after, tip: e.tip_after }; if (S.t === k) render(false); }
   else if (e.t === 'harness') LIVE.said = e.reply || e.sent || '';
+  else if (e.t === 'say') { const k = RUN.path.length - 1; RUN.said[k] = `said: "${e.text}"` + (e.heard_by && e.heard_by.length ? ` (heard by ${e.heard_by.join(', ')})` : ' (nobody heard)'); if (S.t === k) render(false); }
   else if (e.t === 'walk') { const atEnd = S.t === RUN.path.length - 1;
     RUN.path.push(e.to); RUN.times.push(Math.max(0, Math.round(e.t_wall - LIVE.t0))); RUN.said.push(String(LIVE.said).slice(0, 120)); LIVE.said = '';
     if (RUN.nb) { RUN.nb.push(''); RUN.nbLine.push(''); } RUN.pen.push(null);
