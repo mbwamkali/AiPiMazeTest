@@ -65,9 +65,9 @@ def view(screen, last):
     return "\n".join(lines), doors
 
 
-def messages(persona, screen, last, quiet):
+def messages(persona, screen, last, quiet, prompt_name=None):
     text, doors = view(screen, last)
-    return [{"role": "system", "content": P.SYSTEM[persona] + (QUIET2 if quiet else TALK2)},
+    return [{"role": "system", "content": P.system_prompt(persona, prompt_name) + (QUIET2 if quiet else TALK2)},
             {"role": "user", "content": text}], doors
 
 

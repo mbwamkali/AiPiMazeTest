@@ -16,7 +16,7 @@
 #   THREADS       llama-server threads                               (default: 4)
 #   LOG_DIR       where the llama-server log goes                    (default: current folder)
 set -euo pipefail
-WHO=${1:?persona: NoMoe, Harry or Curlee}; DIMS=${2:?dims}; SIZE=${3:?size}; SEED=${4:?seed}
+WHO=${1:?persona: Mooore, Harry or Curlee}; DIMS=${2:?dims}; SIZE=${3:?size}; SEED=${4:?seed}
 LOOPS=${5:-0}; MAXM=${6:-300}
 
 : "${MODEL:?set MODEL to the ant model (.gguf)}"

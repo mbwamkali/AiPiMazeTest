@@ -91,6 +91,14 @@ class TestLoad(unittest.TestCase):
         with self.assertRaises(config.ConfigError):
             config.parse('mode = "loud"', "runner")
 
+    def test_persona_old_name_still_accepted(self):
+        """Mooore was called NoMoe: old settings keep working and read as the new name."""
+        self.assertEqual(config.parse('persona = "NoMoe"', "ant")["persona"], "Mooore")
+        self.assertEqual(config.parse('persona = "Mooore"', "ant")["persona"], "Mooore")
+        with self.assertRaises(config.ConfigError) as e:
+            config.parse('persona = "Bob"', "ant")
+        self.assertNotIn("NoMoe", str(e.exception))   # the old name is not offered
+
     def test_default_path_only_if_present(self):
         home = tempfile.mkdtemp()
         old = os.environ.get("HOME")

@@ -14,7 +14,7 @@ import sys
 
 CONFIG_DIR = os.path.join("~", "hypermaze", "config")
 
-from .schema import CHOICES, COMPONENTS, PATH_KEYS, REQUIRED, SCHEMA  # noqa: E402,F401
+from .schema import ALIASES, CHOICES, COMPONENTS, PATH_KEYS, REQUIRED, SCHEMA  # noqa: E402,F401
 
 
 class ConfigError(Exception):
@@ -47,6 +47,7 @@ def parse(text, component, where="<text>"):
         if not ok:
             raise ConfigError(f"{where}: {k} should be a {want.__name__}, not {type(v).__name__}")
         choices = CHOICES.get((component, k))
+        v = ALIASES.get((component, k), {}).get(v, v)
         if choices and v not in choices:
             raise ConfigError(f"{where}: {k} must be one of {', '.join(choices)}")
         out[k] = os.path.expanduser(v) if k in PATH_KEYS else v
