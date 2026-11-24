@@ -45,10 +45,33 @@ licensed Apache-2.0.
 
 A player, whether an ant or a larger model, sees the maze only through `runner/house.py` and the
 keeper's contestant port. That interface lists the current room and the doors out of it, each door
-labelled with the room it leads to, in alphabetical order. Nothing else: no size, shape, coordinates,
+labelled with the room it leads to, in alphabetical order, plus what the room's walls are made of and
+anything written on them. Nothing else: no size, shape, coordinates,
 directions, distances, room counts, shortest route or ready-made notes. Everything a player remembers
 is in its own context or in its notebook. The keeper stores the notebook so the Colosseum can watch it,
 but the notebook is plain paper: it returns only what the player wrote and treats any text the same.
+
+### The pen and the walls
+
+The player writes with one pen, in its notebook and on walls (`write on wall <text>` in `house.py`,
+`POST /v1/wall`; a wall line costs a turn, the notebook never does). Three things decide how a line
+comes out, and the player is told none of them: the pen's **ink**, its **tip** condition, and the
+**surface**. Paper and wood take ink cleanly; brick and rough stone use more ink and wear the tip
+(a worn tip drops letters, shown as `_`); damp stone smears; ice, glass, metal and tile take nothing.
+A nearly dry pen writes `(faint) ...`, a dry or broken one writes nothing, in the notebook too. The
+player sees the material ("The walls are brick.") and the writing as it came out, never what the
+material does or how much ink is left; the keeper gives the same reply to every write. The keeper
+logs the true numbers (surface, ink, tip, what was meant, what came out) for the Colosseum only.
+
+Defaults leave runs as they were: every wall is wood and a full pen (200,000 letters on paper) easily
+outlasts a run's notebook. Rulebook settings (see `arena/pen.py` for the surface table):
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `surfaces` | `{}` | share of rooms per material, e.g. `{"brick":0.2,"damp_stone":0.1,"ice":0.05}`; the rest are wood; scattered by seed, never by location |
+| `pen_ink` | `200000` | a full pen, in letters on paper |
+| `wall_ink_per_letter` | `10` | ink per letter on a wall (big letters), times the material's own factor (brick 1.5) |
+| `wear` | see `pen.py` | tip lost per letter per material; overrides merge into the defaults |
 `house.py` imports nothing from this project, so a player's machine needs only that one file (and
 should hold nothing else from this repository). `tests/test_arena.py` checks all of this.
 
@@ -201,7 +224,8 @@ Edits: `remove_door`, `add_door`, `swap_rooms`, `shift_block`, `rename_room`, `m
 always refuses an edit that changes the room the player stands in or the doors it shows, moves or
 renames the Way Out, or cuts any room off from it. The rulebook fixed at the start of a run
 (its SHA-256 fingerprint is logged) can limit more: `allowed_edits`, `seen_rooms`, `max_edits`,
-`min_turns_between_edits`, `editors`, `max_moves`, `generator` (`dfs`, `wilson`, `prim`).
+`min_turns_between_edits`, `editors`, `max_moves`, `generator` (`dfs`, `wilson`, `prim`), and the
+pen and wall settings above.
 
 ## Offline play and the Python API
 

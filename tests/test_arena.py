@@ -102,7 +102,7 @@ class TestKeeperAPI(unittest.TestCase):
     def test_room_shows_only_the_current_room(self):
         st, v = self.kp.room(self.tok)
         self.assertEqual(st, 200)
-        self.assertEqual(set(v), {"room", "doors", "turn", "messages", "ended"})
+        self.assertEqual(set(v), {"room", "doors", "walls", "marks", "turn", "messages", "ended"})
         m = Maze(3, 3, 0, 7)
         self.assertEqual(v["room"], m.names[m.start])
         self.assertEqual(v["doors"], abc(m.names[x] for x in m.adj[m.start]))  # alphabetical: no direction given away
@@ -212,7 +212,7 @@ class TestKeeperAPI(unittest.TestCase):
         for c in m.shortest_path()[1:]:
             st, v = self.kp.walk(self.tok, m.names[c])
         self.assertEqual((v["ended"], v["moves"]), ("way_out", m.shortest))
-        self.assertEqual(set(v), {"room", "doors", "turn", "messages", "ended", "moves"})  # no shortest, no flags
+        self.assertEqual(set(v), {"room", "doors", "walls", "marks", "turn", "messages", "ended", "moves"})  # no shortest, no flags
 
     def test_notebook_device(self):
         st, v, _ = self.kp.req(self.kp.cport, "GET", "/v1/device/notebook", headers=self.kp.bearer(self.tok))
@@ -505,8 +505,12 @@ class TestRunner(unittest.TestCase):
                   # the house's shape: nothing in the interface may know or hint at it
                   "shortest", "dims", "dimension", "size", "coord", "dist", "grid", "axis", "north", "south",
                   "east", "west", "floor", "layer", "storey", "level", "generator", "loops", "rooms in",
-                  "untried", "visited", "came from", "map", "hypermaze", "maze"):
+                  "untried", "visited", "came from", "map", "hypermaze", "maze",
+                  # the pen and the walls: the material is named, never what it does to the pen
+                  "ink", "tip", "wear", "worn", "smear", "faint", "skip", "surface", "damage", "durab"):
             self.assertNotIn(w, text, w)
+        for w in ("brick", "ice", "glass", "damp", "metal", "wood", "stone", "plaster", "tile"):   # whole words
+            self.assertIsNone(re.search(r"\b" + w + r"\b", text), w)
 
     def test_interface_stands_alone(self):
         """The interface imports nothing from this project: a player machine needs only this one file."""
@@ -518,7 +522,7 @@ class TestRunner(unittest.TestCase):
         rid, tok = self.kp.new_run(seed=14)
         m = Maze(3, 3, 0, 14)
         _, v = self.kp.room(tok)
-        allowed = {"room", "doors", "turn", "messages", "ended", "moves", "farewell"}
+        allowed = {"room", "doors", "walls", "marks", "turn", "messages", "ended", "moves", "farewell"}
         cur = m.start
         for c in m.shortest_path(m.start)[1:]:
             self.assertLessEqual(set(v), allowed)

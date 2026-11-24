@@ -246,6 +246,9 @@ On the machine that holds the admin key, start a run and copy its token and id t
 tools/arena.py new --dims 2 --size 8 --rule max_moves=300
 ```
 
+Harder walls are rulebook settings too (all wood when left out), for example
+`--rule 'surfaces={"brick":0.2,"damp_stone":0.1,"ice":0.05}' --rule pen_ink=20000`.
+
 On the Pi (with `ant.toml` pointing `token_file`, `run_file` and `harness_key_file` at these):
 
 ```bash

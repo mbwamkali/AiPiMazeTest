@@ -4,8 +4,10 @@ A device the player uses one line at a time:
   view(page)   the whole page as text (the open page if page is None)
   input(line)  one command line -> a short reply (navigation commands reply with the page)
 
-It is plain paper: it stores exactly what the player writes and knows nothing about the house.
-Any text gets the same treatment, so writing can't be used to learn anything about the rooms.
+It is plain paper and knows nothing about the house. Lines are written with the player's pen
+(render, see pen.py): the page keeps what actually came out, which with a good pen is exactly
+what the player wrote. Any text gets the same treatment and the same reply, so writing can't be
+used to learn anything about the rooms, or about the pen.
 Commands (none of them cost a move): read, read page <n>, page <n>, next, back, write <text>,
 erase <line>, tab <label>, tabs.
 """
@@ -22,8 +24,9 @@ def _atoi(s):
 
 
 class Notebook:
-    def __init__(self, pages=100, lines=35, width=60):
+    def __init__(self, pages=100, lines=35, width=60, render=None):
         self.pages, self.lines, self.width = pages, lines, width
+        self.render = render or (lambda part: part)   # the pen: intended line -> what comes out
         self.book = [[""] * lines for _ in range(pages)]
         self.tabs = [""] * pages
         self.open_page = 0
@@ -104,12 +107,12 @@ class Notebook:
             pg = self.book[self.open_page]
             free = [i for i in range(self.lines) if not pg[i]]
             if not parts:
-                return "You hold the pencil over the page, but write nothing."
+                return "You hold the pen over the page, but write nothing."
             if len(parts) > len(free):
                 return (f"There isn't room on page {self.open_page + 1} ({len(free)} lines free, "
                         f"that needs {len(parts)}). Turn to another page.")
             for k, part in enumerate(parts):
-                pg[free[k]] = part
+                pg[free[k]] = self.render(part) or " "   # a line that didn't take still uses the line
             o = f"You write it on page {self.open_page + 1}, line" + ("s " if len(parts) > 1 else " ") + str(free[0] + 1)
             if len(parts) > 1:
                 o += f"-{free[len(parts) - 1] + 1}"

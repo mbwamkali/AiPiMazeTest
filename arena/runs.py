@@ -2,7 +2,7 @@
 
 Each run is a folder <data>/runs/<run_id>/ with
   run.json      settings, rulebook and its fingerprint, token hash
-  events.jsonl  append-only: start, walk, edit, refused, message, harness, device, end
+  events.jsonl  append-only: start, walk, wall, edit, refused, message, harness, device, end
 The state (position, visits, the maze with its edits) is rebuilt by replaying events.jsonl,
 so a keeper restart picks up runs where they were.
 """
@@ -16,9 +16,13 @@ import time
 from hypermaze.core import Maze
 from . import rulebook as rules
 from .notebook import Notebook
+from .pen import PAPER, Pen, assign_surfaces
 from .world import World, EditRefused
 
 DEFAULT_FAREWELL = "The lights go out. The game is over."
+MAX_WALL = 120          # letters in one line written on a wall
+MAX_MARKS = 20          # lines a room's walls show (the oldest are written over)
+WALL_REPLY = "You write on the wall."   # the same for every wall and every pen
 
 
 def _hash_token(tok):
@@ -32,6 +36,7 @@ class Run:
         self.settings = settings
         self.rulebook = rb
         self.fingerprint = rules.fingerprint(rb)
+        self.rules = rules.complete(rb)   # rb plus any settings it predates, at their defaults
         self.token_hash = token_hash
         maze = Maze(settings["dims"], settings["size"], settings["loops"], settings["seed"], rb["generator"])
         self.world = World(maze)
@@ -47,7 +52,14 @@ class Run:
         self.pending = []           # in-world messages for the next screen
         self.ended = None           # None | way_out | exhausted | stopped
         self.farewell = None
-        self.notebook = Notebook()  # the player's notebook: only what the player writes
+        r = self.rules
+        self.surfaces = assign_surfaces(maze.n, settings["seed"], r["surfaces"])   # wall material per room
+        self.pen = Pen(r["pen_ink"], r["wall_ink_per_letter"], r["wear"])       # hidden: ink and tip
+        self.pen_seed = f"{settings['seed']}:{self.id}"
+        self.marks = {}             # room -> lines on its walls, as they came out
+        self.writes = 0             # lines written on walls
+        self._pen_log = None        # the last notebook line's pen numbers, for the device event
+        self.notebook = Notebook(render=self._on_paper)  # the player's notebook: only what the player writes
         self.events = []
         self.lock = threading.RLock()
         self.cond = threading.Condition(self.lock)
@@ -80,7 +92,8 @@ class Run:
         Doors come in alphabetical order so their order gives no direction away."""
         with self.lock:
             w = self.world.view(self.cur)
-            v = {"room": w["room"], "doors": sorted(w["doors"], key=lambda d: (d.lower(), d))}
+            v = {"room": w["room"], "doors": sorted(w["doors"], key=lambda d: (d.lower(), d)),
+                 "walls": self.surfaces[self.cur], "marks": list(self.marks.get(self.cur, []))}
             v.update(turn=self.moves, messages=self.pending, ended=self.ended)
             if self.ended:
                 v.update(self._end_info())
@@ -129,6 +142,36 @@ class Run:
             if not self.ended:
                 self._end("stopped", write, farewell or DEFAULT_FAREWELL)
 
+    # ---- the pen ----------------------------------------------------------------------
+    def _on_paper(self, part):
+        line, log = self.pen.render(part, PAPER, self.pen_seed)
+        if self._pen_log is not None:
+            self._pen_log.append(log)
+        return line
+
+    def wall_write(self, text, write=True):
+        """Write one line on this room's walls. Costs a turn. The reply is always the same; the room view
+        then shows the line as it actually came out (or doesn't, if the wall didn't take it)."""
+        with self.lock:
+            if self.ended:
+                return dict(self.room_view(), reply="")
+            text = " ".join(str(text).split())[:MAX_WALL]
+            if not text:
+                return dict(self.room_view(), reply="You hold the pen to the wall, but write nothing.")
+            surface = self.surfaces[self.cur]
+            line, log = self.pen.render(text, surface, self.pen_seed)
+            if line:
+                ms = self.marks.setdefault(self.cur, [])
+                ms.append(line)
+                del ms[:-MAX_MARKS]
+            self.moves += 1
+            self.writes += 1
+            self._emit(dict({"t": "wall", "n": self.moves, "room": self.cur, "room_name": self.world.names[self.cur]},
+                            **log), write)
+            if self.rulebook.get("max_moves") and self.moves >= self.rulebook["max_moves"]:
+                self._end("exhausted", write)
+            return dict(self.room_view(), reply=WALL_REPLY)
+
     # ---- edits ----------------------------------------------------------------------
     def try_edit(self, edit, by="director", why="", apply=True, write=True):
         """Check (and apply) an edit. Returns a result dict: status applied | refused | ok (preview)."""
@@ -176,10 +219,16 @@ class Run:
         if name != "notebook":
             raise LookupError("no_device")
         with self.lock:
-            reply = self.notebook.input(line)
-            self._emit({"t": "device", "device": name, "input": str(line), "reply": reply,
-                        "page": self.notebook.open_page + 1, "screen": self.notebook.view(),
-                        "turn": self.moves}, write)
+            self._pen_log = []
+            try:
+                reply = self.notebook.input(line)
+            finally:
+                pen, self._pen_log = self._pen_log, None
+            ev = {"t": "device", "device": name, "input": str(line), "reply": reply,
+                  "page": self.notebook.open_page + 1, "screen": self.notebook.view(), "turn": self.moves}
+            if pen:
+                ev["pen"] = pen      # for the Colosseum only: what was meant, what came out, ink and tip
+            self._emit(ev, write)
             return {"reply": reply, "screen": self.notebook.view()}
 
     # ---- harness --------------------------------------------------------------------
@@ -187,6 +236,17 @@ class Run:
         with self.lock:
             keep = {k: data[k] for k in ("turn", "sent", "reply", "where", "screen", "speed") if k in data}
             return self._emit(dict(t="harness", **keep), write)
+
+    def map_dict(self):
+        """The whole maze as it stands (World.to_dict) plus each room's walls and what is written on them."""
+        with self.lock:
+            d = self.world.to_dict()
+            for r in d["rooms"]:
+                r["walls"] = self.surfaces[r["id"]]
+                if self.marks.get(r["id"]):
+                    r["marks"] = list(self.marks[r["id"]])
+            d["surfaces"] = self.rules["surfaces"]
+            return d
 
     # ---- summaries ------------------------------------------------------------------
     def state(self):
@@ -196,7 +256,8 @@ class Run:
                     "dist": w.dist[self.cur], "moves": self.moves, "shortest": self.settings["shortest"],
                     "closest": self.best, "seen": sorted(self.seen), "path": self.path,
                     "revisits": sum(v - 1 for v in self.visits if v > 1), "edits_used": self.edits_used,
-                    "map_version": w.version, "ended": self.ended, "rulebook": self.rulebook,
+                    "map_version": w.version, "ended": self.ended, "walls": self.surfaces[self.cur],
+                    "pen": self.pen.state(), "wall_writes": self.writes, "rulebook": self.rulebook,
                     "fingerprint": self.fingerprint, "settings": self.settings, "events": len(self.events)}
 
 
@@ -232,6 +293,8 @@ class Store:
                 run.try_edit(ev["edit"], ev.get("by", "director"), ev.get("why", ""))
             elif t == "device":
                 run.device_input(ev["device"], ev["input"])
+            elif t == "wall":
+                run.wall_write(ev["intended"])
             elif t == "end" and not run.ended:
                 run.stop(ev.get("farewell"))
                 run.ended = ev["result"]

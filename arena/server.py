@@ -5,6 +5,7 @@ Contestant port (open to the runner's machine):
   POST /v1/walk   {"to": "<name>"}    go through the door to that room
   GET  /v1/device/notebook[?page=N]   the notebook page as text (the open page by default)
   POST /v1/device/notebook {"line": "<command>"}   one line into the notebook -> reply and open page
+  POST /v1/wall   {"text": "<line>"}  write one line on this room's walls (costs a turn) -> reply and the room
 Admin port (signed requests only; firewalled from the runner's machine):
   POST /admin/runs                    start a run -> run_id, token
   GET  /admin/runs                    list runs
@@ -140,7 +141,7 @@ class ContestantHandler(_Base):
         dev = DEVICE_PATH.match(self.path)
         if dev and dev.group(2):
             dev = None
-        known = self.path == "/v1/walk" or bool(dev)
+        known = self.path in ("/v1/walk", "/v1/wall") or bool(dev)
         run = self._run() if known else None
         if not run:
             return self._404("contestant" if known else "path")
@@ -152,6 +153,14 @@ class ContestantHandler(_Base):
             except (ValueError, KeyError, TypeError):
                 return self._send(400, {"error": "bad_request"})
             return self._send(200, run.device_input(dev.group(1), line))
+        if self.path == "/v1/wall":
+            try:
+                text = json.loads(body or b"{}")["text"]
+                if not isinstance(text, str) or len(text) > 1000:
+                    raise TypeError
+            except (ValueError, KeyError, TypeError):
+                return self._send(400, {"error": "bad_request"})
+            return self._send(200, run.wall_write(text))
         try:
             to = json.loads(body or b"{}")["to"]
             if not isinstance(to, str):
@@ -198,9 +207,7 @@ class AdminHandler(_Base):
             return self._send(200, {"runs": [{"run_id": r.id, "settings": r.settings, "moves": r.moves,
                                                "ended": r.ended} for r in self.keeper.store.runs.values()]})
         if sub == "/map":
-            with run.lock:
-                d = run.world.to_dict()
-            return self._send(200, d)
+            return self._send(200, run.map_dict())
         if sub == "/state":
             return self._send(200, run.state())
         if sub == "/log":
