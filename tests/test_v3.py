@@ -60,6 +60,29 @@ class TestRelay(unittest.TestCase):
             self.assertLessEqual(p.writes, 1)                # each ant tries ice once, then never again
         self.assertTrue(any("ice" in p.bad for p in g.players))
 
+    def test_screen_says_nothing_about_teammates_beyond_the_briefing(self):
+        g = RelayGame(Maze(2, 8, 0.2, 3), ants=3, seed=3)
+        while not g.done:
+            text, opt = g.screen()
+            for line in text.split("\n"):
+                if "ant" in line.lower() and not line.startswith(("Room:", "Last action:")) and line[:1] not in "0123456789":
+                    self.assertTrue(line.startswith(("Your notes: ", "B - ")), line)
+            g.apply(opt[g.teach()[0]])
+        lone = RelayGame(Maze(2, 8, 0.2, 3), ants=1, seed=3)          # briefed: nobody after, no B
+        while not lone.done:
+            text, opt = lone.screen()
+            self.assertNotIn("B", opt)
+            lone.apply(opt[lone.teach()[0]])
+
+    def test_unbriefed_offers_marking_at_every_way_out(self):
+        g = RelayGame(Maze(2, 8, 0.2, 3), ants=1, seed=3, briefing="none")
+        offered = False
+        while not g.done:
+            text, opt = g.screen()
+            offered |= "B" in opt
+            g.apply(opt[g.teach()[0]])
+        self.assertTrue(offered)
+
     def test_lessons_are_legal(self):
         out = os.path.join(tempfile.mkdtemp(), "l.jsonl")
         lessons3.main(["--out", out, "--games", "12"])
