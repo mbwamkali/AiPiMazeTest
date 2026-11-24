@@ -64,7 +64,7 @@ def main(argv=None):
     ap.add_argument("--chatty", type=float, default=0.08)
     ap.add_argument("--keep", type=float, default=1.0,
                     help="keep this share of the lessons (more mazes for the same number of lessons)")
-    ap.add_argument("--teacher", choices=["strict", "strictC", "strictR", "tagged"], default="tagged",
+    ap.add_argument("--teacher", choices=["strict", "strictC", "strictR", "human", "tagged"], default="tagged",
                     help="strict: only moves the screen justifies; tagged: code tags the way back / route door")
     ap.add_argument("--shapes", choices=["2d", "mix"], default="2d",
                     help="2d: 2D mazes 6-24 (project scope); mix: v2's 2D-5D mix")

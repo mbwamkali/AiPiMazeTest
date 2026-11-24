@@ -57,20 +57,27 @@ class Player:
         self.marked = False       # it has already marked the way
         self.wrote = set()        # rooms where it already tried to write its trail note
         self.followed = set()     # (room, door) "out" notes it already followed
-        self.route_note = None    # its route, if it wrote a readable ROUTE line in its notebook (strictR)
+        self.route_note = None    # its route, if it wrote a readable ROUTE line in its notebook (strictR, human)
+        self.loop_back = False    # arrived somewhere it had been, through a door it had never used
         self.following = False
         self.prev = None
         self.last = None          # for the "Last action" line
         self.rng = random.Random(self.seed)
+        self.lines = []
+        self.full_moves = False   # human mode writes "MOVE: A -> B" so a room's notes show both ends
         self._note(self.pos, None)
 
     def _paper(self, text):
         line, _ = self.pen.render(text, PAPER, self.seed)
-        return readable(line, text)
+        ok = readable(line, text)
+        if ok:
+            self.lines.append(text)          # what its notebook holds (for the human-equal lookup)
+        return ok
 
     def _note(self, room, frm):
         m = self.m
-        ok_move = frm is None or self._paper(f"> {m.names[room]}")
+        ok_move = frm is None or self._paper(f"MOVE: {m.names[frm]} -> {m.names[room]}" if self.full_moves
+                                             else f"> {m.names[room]}")
         if room not in self.doors and self._paper(
                 f"ROOM: {m.names[room]} | doors: " + "; ".join(m.names[x] for x in m.adj[room])):
             self.doors[room] = list(m.adj[room])
@@ -139,6 +146,9 @@ class RelayGame:
         #   Way Out along that same chain with a note in every room, and walk out by following "out" notes.
         # tagged: the code tags the door toward the nearest untried room / along the known route (v3b-style).
         self.teacher = teacher
+        if teacher == "human":
+            for p in self.players:
+                p.full_moves = True
         n = len(self.players)
         for i, p in enumerate(self.players):
             p.after, p.team_size = None, None
@@ -166,7 +176,40 @@ class RelayGame:
         return self.briefing == "none" or bool(a.after) or (a.team_size or 0) > 1
 
     # ---- what the ant sees ----------------------------------------------------------
+    def screen_human(self):
+        """What a human player gets: the room, its walls and notes, its doors, company, and the player's own
+        notebook (here: the lines that mention this room, plus page-1 notes about itself)."""
+        a, m = self.cur, self.m
+        cur, names = a.pos, m.names
+        doors = sorted((names[x] for x in m.adj[cur]), key=lambda d: (d.lower(), d))
+        lines = [f"Room: {names[cur]}", f"Walls: {self.surfaces[cur].replace('_', ' ')}"]
+        options = {"map": ("map",)}
+        for i, d in enumerate(doors, 1):
+            lines.append(f"{i} {d}")
+            options[str(i)] = ("go", d)
+        if self.marks.get(cur):
+            lines.append("On the walls: " + " | ".join(self.marks[cur]))
+        mine = [l for l in a.lines if l.startswith(("TEAM:", "WALLS:"))]
+        about = [l for l in a.lines if names[cur] in l.replace(";", " ;").split(" | ")[0] or f" {names[cur]}" in l
+                 or l.endswith(names[cur])][-8:]
+        if mine:
+            lines.append("Your notes about yourself: " + " | ".join(mine))
+        lines.append("Your notes about this room: " + (" | ".join(about) if about else "none"))
+        if a.trailing and a.route and cur in a.route:
+            k = a.route.index(cur)
+            note = f"out {names[a.route[k + 1]]}"
+            if (len(m.adj[cur]) >= 3 or cur == m.start) and note not in self.marks.get(cur, []) and cur not in a.wrote:
+                lines.append(f"W - write on the wall: {note}")
+                options["W"] = ("write", note)
+        if m.goal in m.adj[cur] and not a.marked and not a.trailing and (a.team_size or a.after):
+            lines.append("B - go back and mark the way")
+            options["B"] = ("mark",)
+        lines.append(V.last_text(a.last))
+        return "\n".join(lines), options
+
     def screen(self):
+        if self.teacher == "human":
+            return self.screen_human()
         a, m = self.cur, self.m
         cur = a.pos
         names = m.names
@@ -243,7 +286,7 @@ class RelayGame:
         text, options = self.screen()
         by_door = {v[1]: k for k, v in options.items() if v[0] == "go"}
         names, cur = m.names, a.pos
-        if self.teacher.startswith("strict"):
+        if self.teacher.startswith("strict") or self.teacher == "human":
             return self.teach_strict(text, options, by_door)
         if "B" in options:
             back = len(a.path(m.start) or [cur]) - 1
@@ -288,6 +331,11 @@ class RelayGame:
     def teach_strict(self, text, options, by_door):
         a, m = self.cur, self.m
         names, cur = m.names, a.pos
+        if "B" in options and self.teacher == "human":
+            followers = (a.team_size - 1) / 2 if a.team_size else (a.after or 0)
+            if followers * a.moves > 3 * len(a.chain() or [0]) + 2:
+                return "B", "mark"
+            return by_door[names[m.goal]], "goal"
         if "B" in options:
             back = self.back_len(a)
             followers = a.after if a.after is not None else \
@@ -302,6 +350,10 @@ class RelayGame:
                 return by_door[names[a.came[cur]]], "back_trail"
         if names[m.goal] in by_door:
             return by_door[names[m.goal]], "goal"
+        if self.teacher == "human" and a.route_note and not a.trailing and cur in a.route_note:
+            k = a.route_note.index(cur)
+            if k + 1 < len(a.route_note) - 1:
+                return by_door[names[a.route_note[k + 1]]], "route"
         for d, k in by_door.items():
             if "your ROUTE note goes this way" in next((l for l in text.split("\n") if l.startswith(k + " ")), ""):
                 return k, "route"
@@ -313,7 +365,13 @@ class RelayGame:
             ahead = [x for x in m.adj[cur] if x != a.prev]
             if ahead:
                 return by_door[names[ahead[0]]], "follow_on"     # "Last action: followed the trail here"
-        fresh = a.fresh(cur)
+        if self.teacher == "human" and a.loop_back and a.prev is not None and a.prev in m.adj[cur]:
+            a_prev = a.prev                         # Tremaux: a new door led somewhere I'd been, so turn back
+            return by_door[names[a_prev]], "back_loop"
+        if self.teacher == "human":                 # only this room's notes: an untried door may lead somewhere known
+            fresh = [x for x in m.adj[cur] if (cur, x) not in a.tried]
+        else:
+            fresh = a.fresh(cur)
         if fresh:
             order = sorted(fresh, key=lambda x: (names[x].lower(), names[x]))
             pi = P.NAMES.index(a.persona) if a.persona in P.NAMES else 0
@@ -335,9 +393,9 @@ class RelayGame:
             a.last = ("map",)
             return
         if action[0] == "mark":
-            c = a.chain() if self.teacher.startswith("strict") else None
+            c = a.chain() if self.teacher.startswith("strict") or self.teacher == "human" else None
             a.route = (c if c else (a.path(m.start) or [a.pos])[::-1]) + [m.goal]
-            if self.teacher == "strictR" and a._paper("ROUTE: " + " > ".join(m.names[x] for x in a.route)):
+            if self.teacher in ("strictR", "human") and a._paper("ROUTE: " + " > ".join(m.names[x] for x in a.route)):
                 a.route_note = list(a.route)
             a.trailing = True
             a.last = ("mark",)
@@ -368,6 +426,7 @@ class RelayGame:
                                 and len(m.adj[frm]) == 2)
         a.following = followed or (a.following and len(m.adj[frm]) == 2)
         left_new = bool(a.fresh(frm)) and to in a.visited
+        a.loop_back = (to in a.visited) and ((frm, to) not in a.tried) and not followed
         a.prev, a.pos = frm, to
         a.moves += 1
         a.last = ("trail", m.names[frm]) if self.teacher == "strictC" and on_trail else ("walk", m.names[frm], left_new)
