@@ -20,10 +20,10 @@ All three: take the Way Out when they see it; backtrack to where they first came
 NAMES = ("Mooore", "Harry", "Curlee")
 ALIASES = {"NoMoe": "Mooore"}   # old names still accepted in settings and on the command line
 
-# The name each persona's system prompt uses. The current model was trained on "You are NoMoe, ...",
-# so Mooore's prompt keeps that trained text until the model is retrained. Internal only: it goes to
-# the model and nowhere a person sees it (the harness reports the persona as Mooore).
-TRAINED_PROMPT_NAME = {"Mooore": "NoMoe", "Harry": "Harry", "Curlee": "Curlee"}
+# The name each persona's system prompt uses. The stooges-v2 model was trained on "You are NoMoe, ...";
+# on 200 held-out mazes (temperature 0) it played move for move the same with "You are Mooore, ...",
+# so the prompt now uses the new name. score.py --prompt-name can still try another.
+TRAINED_PROMPT_NAME = {"Mooore": "Mooore", "Harry": "Harry", "Curlee": "Curlee"}
 
 
 def canonical(name):
