@@ -12,13 +12,14 @@ Usage: house.py [--server URL] [--notebook]
 Commands: <room name>, look, quit, and with --notebook: read, read page <n>, next, back,
 write <text>, erase <line>, tab <label>, tabs, and write on wall <text>.
 """
+import http.client
 import json
 import os
 import re
+import ssl
 import sys
 import time
-import urllib.error
-import urllib.request
+import urllib.parse
 
 ENC = "latin-1"
 _TRIM = " \t\r\n.\"'"
@@ -41,9 +42,41 @@ class Gone(Exception):
 
 
 class House:
+    """The house's contestant port over one kept-open connection (reopened quietly when it drops)."""
+
     def __init__(self, url, token):
         self.url = url.rstrip("/")
         self.token = token
+        u = urllib.parse.urlsplit(self.url)
+        self._https = u.scheme == "https"
+        self._host, self._port = u.hostname, u.port
+        self._base = u.path.rstrip("/")
+        self._conn = None
+
+    def _connect(self):
+        if self._https:  # the same trust as before: the system store, or $SSL_CERT_FILE (the settings' ca_cert)
+            return http.client.HTTPSConnection(self._host, self._port, timeout=30, context=ssl.create_default_context())
+        return http.client.HTTPConnection(self._host, self._port, timeout=30)
+
+    def close(self):
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+    def _once(self, method, path, data, headers):
+        """One request on the kept connection -> (status, body). A connection that went stale is reopened
+        once straight away before this counts as a failure."""
+        for fresh in (False, True):
+            if self._conn is None:
+                self._conn = self._connect()
+            try:
+                self._conn.request(method, self._base + path, data, headers)
+                r = self._conn.getresponse()
+                return r.status, r.read()
+            except (http.client.HTTPException, OSError):
+                self.close()
+                if fresh:
+                    raise
 
     def _call(self, method, path, body=None):
         data = json.dumps(body).encode() if body is not None else None
@@ -53,17 +86,14 @@ class House:
         deadline = time.time() + PATIENCE
         wait = 1.0
         while True:
-            req = urllib.request.Request(self.url + path, data, headers, method=method)
             try:
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    return json.load(r)
-            except urllib.error.HTTPError as e:
-                if e.code == 400:
-                    return json.load(e)
-                if e.code == 404:
+                status, raw = self._once(method, path, data, headers)
+                if status == 200 or status == 400:
+                    return json.loads(raw)
+                if status == 404:
                     raise Gone("the house does not know this key")
-                err = e
-            except (urllib.error.URLError, OSError, ValueError) as e:
+                err = f"HTTP {status}"
+            except (http.client.HTTPException, OSError, ValueError) as e:
                 err = e
             if time.time() > deadline:
                 raise Gone(str(err))
@@ -79,6 +109,10 @@ class House:
     def read(self, page=None):
         """A notebook page as text (the open page by default)."""
         return self._call("GET", "/v1/device/notebook" + (f"?page={int(page)}" if page else ""))["screen"]
+
+    def read_pages(self, first, last):
+        """Notebook pages first..last in one request, each screen exactly as read(page) gives it."""
+        return self._call("GET", f"/v1/device/notebook?pages={int(first)}-{int(last)}")["screens"]
 
     def write(self, line):
         """One line into the notebook; returns the notebook's reply."""

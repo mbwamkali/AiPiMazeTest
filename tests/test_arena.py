@@ -238,7 +238,7 @@ class TestKeeperAPI(unittest.TestCase):
         self.assertEqual(v["turn"], 0)  # the notebook never costs a move
         evs = [json.loads(x) for x in self.kp.admin("GET", f"/admin/runs/{self.rid}/log")[1].decode().splitlines()]
         dev = [e for e in evs if e["t"] == "device"]
-        self.assertEqual([e["input"] for e in dev], ["write Coral Hall is cold", "page 2"])  # reads aren't logged
+        self.assertEqual([e["input"] for e in dev], ["write Coral Hall is cold", "page 2"])  # reads are device_view events
         self.assertIn("Coral Hall is cold", dev[0]["screen"])
 
     def test_notebook_same_answer_for_any_text(self):
@@ -251,6 +251,80 @@ class TestKeeperAPI(unittest.TestCase):
         b = json.loads(self.kp.req(self.kp.cport, "POST", "/v1/device/notebook", {"line": "write " + fake}, headers=h)[1])
         self.assertEqual(a["reply"], b["reply"])
         self.assertEqual(a["screen"].replace(real, "X"), b["screen"].replace(fake, "X"))
+
+    def _nb(self, path):
+        st, v, _ = self.kp.req(self.kp.cport, "GET", path, headers=self.kp.bearer(self.tok))
+        return st, json.loads(v)
+
+    def _fill(self, pages):
+        h = self.kp.bearer(self.tok)
+        for p in range(1, pages + 1):
+            self.kp.req(self.kp.cport, "POST", "/v1/device/notebook", {"line": f"page {p}"}, headers=h)
+            self.kp.req(self.kp.cport, "POST", "/v1/device/notebook", {"line": f"write line on page {p}"}, headers=h)
+        self.kp.req(self.kp.cport, "POST", "/v1/device/notebook", {"line": "tab four"}, headers=h)
+
+    def test_notebook_page_range_equals_single_reads(self):
+        self._fill(4)
+        _, before = self._nb("/v1/device/notebook")
+        singles = [self._nb(f"/v1/device/notebook?page={p}")[1]["screen"] for p in range(1, 6)]
+        st, r = self._nb("/v1/device/notebook?pages=1-5")
+        self.assertEqual(st, 200)
+        self.assertEqual(set(r), {"screens"})
+        self.assertEqual(r["screens"], singles)      # page 5 blank, page 4 tabbed: each screen exactly as alone
+        self.assertEqual(self._nb("/v1/device/notebook?pages=3-3")[1]["screens"], singles[2:3])
+        self.assertEqual(self._nb("/v1/device/notebook")[1], before)  # reading leaves the open page alone
+        _, v = self.kp.room(self.tok)
+        self.assertEqual(v["turn"], 0)
+
+    def test_notebook_bad_page_range(self):
+        self._fill(1)
+        _, bad = self._nb("/v1/device/notebook?page=101")
+        for rng in ("0-3", "3-2", "99-101", "101-101", "0-0"):
+            st, r = self._nb(f"/v1/device/notebook?pages={rng}")
+            self.assertEqual((st, r), (200, {"screens": [bad["screen"]]}), rng)
+        for path in ("/v1/device/notebook?pages=1", "/v1/device/notebook?pages=1-", "/v1/device/notebook?pages=a-b",
+                     "/v1/device/notebook?pages=1-2&page=1", "/v1/device/notebook?pages=-1-2", "/v1/device/notebook?pages=1-99999"):
+            self.assertEqual(self._nb(path)[0], 404, path)
+        st, _, _ = self.kp.req(self.kp.cport, "GET", "/v1/device/notebook?pages=1-2", headers=self.kp.bearer("wrong"))
+        self.assertEqual(st, 404)
+        st, _, _ = self.kp.req(self.kp.cport, "POST", "/v1/device/notebook?pages=1-2", {"line": "next"},
+                               headers=self.kp.bearer(self.tok))
+        self.assertEqual(st, 404)                     # a range is only for reading
+        evs = [json.loads(x) for x in self.kp.admin("GET", f"/admin/runs/{self.rid}/log")[1].decode().splitlines()]
+        self.assertEqual([e for e in evs if e["t"] == "device_view"], [])  # nothing logged for pages that aren't there
+
+    def test_notebook_reads_logged(self):
+        self._fill(2)
+        self._nb("/v1/device/notebook")
+        self._nb("/v1/device/notebook?page=1")
+        self._nb("/v1/device/notebook?pages=1-3")
+        evs = [json.loads(x) for x in self.kp.admin("GET", f"/admin/runs/{self.rid}/log")[1].decode().splitlines()]
+        views = [e for e in evs if e["t"] == "device_view"]
+        self.assertEqual([(e["device"], e["pages"], e["turn"]) for e in views],
+                         [("notebook", [2], 0), ("notebook", [1], 0), ("notebook", [1, 2, 3], 0)])
+        self.assertTrue(all("t_wall" in e for e in views))
+        run = Store(self.kp.dir).runs[self.rid]       # a restart replays the notebook and skips the views
+        self.assertIn("line on page 2", run.notebook.view(2))
+        self.assertEqual(run.notebook.open_page, 1)
+        self.assertEqual(len(run.events), len(evs))
+
+    def test_house_client_reads_pages_over_one_connection(self):
+        sys.path.insert(0, os.path.join(ROOT, "runner"))
+        from house import House
+        self._fill(3)
+        h = House(self.kp.url, self.tok)
+        made = []
+        real = h._connect
+        h._connect = lambda: made.append(1) or real()
+        self.assertEqual(h.read_pages(1, 3), [h.read(p) for p in (1, 2, 3)])
+        h.write("write one more")
+        h.room()
+        self.assertEqual(len(made), 1)                # kept open between calls
+        h._conn.sock.close()                          # the connection drops: reopened quietly
+        self.assertIn("one more", h.read_pages(3, 3)[0])
+        self.assertEqual(len(made), 2)
+        self.assertIn("pages 1 to", h.read_pages(5, 2)[0])
+        h.close()
 
     def test_notebook_survives_restart(self):
         h = self.kp.bearer(self.tok)
@@ -516,7 +590,7 @@ class TestRunner(unittest.TestCase):
         """The interface imports nothing from this project: a player machine needs only this one file."""
         with open(HOUSE) as f:
             imports = {ln.split()[1].split(".")[0] for ln in f if ln.startswith(("import ", "from "))}
-        self.assertLessEqual(imports, {"json", "os", "re", "sys", "time", "urllib", "argparse", "tomllib"})
+        self.assertLessEqual(imports, {"json", "os", "re", "sys", "time", "urllib", "http", "ssl", "argparse", "tomllib"})
 
     def test_contestant_sees_only_room_doors_and_turn(self):
         rid, tok = self.kp.new_run(seed=14)
@@ -604,6 +678,25 @@ class TestTLS(unittest.TestCase):
             del os.environ["SSL_CERT_FILE"]
         self.assertNotIn("gone quiet", got)
         self.assertIn("You are in the", got)
+
+    def test_house_client_keeps_one_https_connection(self):
+        sys.path.insert(0, os.path.join(ROOT, "runner"))
+        from house import House
+        rid, tok = self.kp.new_run(seed=34)
+        os.environ["SSL_CERT_FILE"] = self.ca
+        try:
+            h = House(f"https://127.0.0.1:{self.kp.cport}", tok)
+            made = []
+            real = h._connect
+            h._connect = lambda: made.append(1) or real()
+            for k in range(5):
+                h.write(f"write note {k}")
+            self.assertEqual(len(h.read_pages(1, 2)), 2)
+            self.assertIn("note 4", h.read(1))
+            self.assertEqual(len(made), 1)
+            h.close()
+        finally:
+            del os.environ["SSL_CERT_FILE"]
 
 
 class TestEndToEnd(unittest.TestCase):

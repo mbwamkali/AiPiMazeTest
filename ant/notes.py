@@ -41,8 +41,8 @@ class AntNotes:
     def records(self):
         """The ant's notebook records in order, wrapped lines joined back up."""
         out = []
-        for p in range(1, self.page + 1):
-            for ln in self.house.read(p).splitlines():
+        for screen in self.house.read_pages(1, self.page):
+            for ln in screen.splitlines():
                 m = LINE.match(ln)
                 if not m:
                     continue
