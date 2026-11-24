@@ -2,7 +2,7 @@
 
 Each run is a folder <data>/runs/<run_id>/ with
   run.json      settings, rulebook and its fingerprint, token hash
-  events.jsonl  append-only: start, walk, wall, edit, refused, message, harness, device, device_view, end
+  events.jsonl  append-only: start, walk, wall, say, edit, refused, message, harness, device, device_view, end
 The state (position, visits, the maze with its edits) is rebuilt by replaying events.jsonl,
 so a keeper restart picks up runs where they were.
 """
@@ -17,6 +17,7 @@ from hypermaze.core import Maze
 from . import rulebook as rules
 from .notebook import Notebook
 from .pen import PAPER, Pen, assign_surfaces
+from .team import MAX_SAY, Team
 from .world import World, EditRefused
 
 DEFAULT_FAREWELL = "The lights go out. The game is over."
@@ -56,7 +57,8 @@ class Run:
         self.surfaces = assign_surfaces(maze.n, settings["seed"], r["surfaces"])   # wall material per room
         self.pen = Pen(r["pen_ink"], r["wall_ink_per_letter"], r["wear"])       # hidden: ink and tip
         self.pen_seed = f"{settings['seed']}:{self.id}"
-        self.marks = {}             # room -> lines on its walls, as they came out
+        self.marks = {}             # room -> lines on its walls, as they came out (the team's, in a team)
+        self.team = None            # the Team this run plays in, if its match is a team
         self.writes = 0             # lines written on walls
         self._pen_log = None        # the last notebook line's pen numbers, for the device event
         self.notebook = Notebook(render=self._on_paper)  # the player's notebook: only what the player writes
@@ -95,6 +97,8 @@ class Run:
             w = self.world.view(self.cur)
             v = {"room": w["room"], "doors": sorted(w["doors"], key=lambda d: (d.lower(), d)),
                  "walls": self.surfaces[self.cur], "marks": list(self.marks.get(self.cur, []))}
+            if self.team and self.team.mode == "together":
+                v["here"] = [self.team.name_of(r) for r in self.team.others_here(self)]
             v.update(turn=self.moves, messages=self.pending, ended=self.ended)
             if self.ended:
                 v.update(self._end_info())
@@ -162,9 +166,10 @@ class Run:
             surface = self.surfaces[self.cur]
             line, log = self.pen.render(text, surface, self.pen_seed)
             if line:
-                ms = self.marks.setdefault(self.cur, [])
-                ms.append(line)
-                del ms[:-MAX_MARKS]
+                with (self.team.lock if self.team else self.lock):     # a team shares its walls
+                    ms = self.marks.setdefault(self.cur, [])
+                    ms.append(line)
+                    del ms[:-MAX_MARKS]
             self.moves += 1
             self.writes += 1
             self._emit(dict({"t": "wall", "n": self.moves, "room": self.cur, "room_name": self.world.names[self.cur]},
@@ -172,6 +177,23 @@ class Run:
             if self.rulebook.get("max_moves") and self.moves >= self.rulebook["max_moves"]:
                 self._end("exhausted", write)
             return dict(self.room_view(), reply=WALL_REPLY)
+
+    # ---- talking (a team playing together: only the ants in the same room hear) -----------
+    def say(self, text, write=True):
+        """Say one line. Costs nothing; the ants standing here now hear it on their next screen."""
+        text = " ".join(str(text).split())[:MAX_SAY]
+        with self.lock:
+            if self.ended or not text:
+                return dict(self.room_view(), reply="You say nothing.")
+            hearers = self.team.others_here(self) if self.team else []
+            me = self.team.name_of(self) if self.team else ""
+            self._emit({"t": "say", "turn": self.moves, "room": self.cur, "text": text,
+                        "heard_by": [self.team.name_of(r) for r in hearers]}, write)
+        for r in hearers:                       # deliver outside our own lock: no two runs lock each other
+            with r.lock:
+                r.pending.append(f'{me} says: "{text}"')
+        with self.lock:
+            return dict(self.room_view(), reply=f'You say: "{text}"' if hearers else "Nobody here hears you.")
 
     # ---- edits ----------------------------------------------------------------------
     def try_edit(self, edit, by="director", why="", apply=True, write=True):
@@ -278,7 +300,8 @@ class Run:
                     "closest": self.best, "seen": sorted(self.seen), "path": self.path,
                     "revisits": sum(v - 1 for v in self.visits if v > 1), "edits_used": self.edits_used,
                     "map_version": w.version, "ended": self.ended, "walls": self.surfaces[self.cur],
-                    "pen": self.pen.state(), "wall_writes": self.writes, "rulebook": self.rulebook,
+                    "pen": self.pen.state(), "wall_writes": self.writes,
+                    "team": self.team.id if self.team else None, "rulebook": self.rulebook,
                     "fingerprint": self.fingerprint, "settings": self.settings, "events": len(self.events)}
 
 
@@ -289,12 +312,26 @@ class Store:
         self.root = os.path.join(data_dir, "runs")
         os.makedirs(self.root, mode=0o700, exist_ok=True)
         self.runs = {}
+        self.teams = {}             # match id -> Team
         self.lock = threading.Lock()
         for rid in sorted(os.listdir(self.root)):
             try:
                 self.runs[rid] = self._load(os.path.join(self.root, rid))
             except (OSError, ValueError, KeyError) as e:
                 print(f"skipping run {rid}: {e}")
+        for run in sorted(self.runs.values(), key=lambda r: (r.settings.get("match", ""), r.settings.get("seat", 0), r.id)):
+            self._join_team(run)
+        for team in self.teams.values():
+            team.rebuild_marks(MAX_MARKS)
+
+    def _join_team(self, run):
+        mode, match = run.rules.get("team", "solo"), run.settings.get("match")
+        if mode == "solo" or not match:
+            return
+        team = self.teams.get(match)
+        if team is None:
+            team = self.teams[match] = Team(match, mode)
+        team.add(run)
 
     def _load(self, d):
         with open(os.path.join(d, "run.json")) as f:
@@ -316,6 +353,7 @@ class Store:
                 run.device_input(ev["device"], ev["input"])
             elif t == "wall":
                 run.wall_write(ev["intended"])
+            # "say" changes nothing in the run itself (what others heard was shown then)
             elif t == "end" and not run.ended:
                 run.stop(ev.get("farewell"))
                 run.ended = ev["result"]
@@ -336,6 +374,8 @@ class Store:
         for k in ("match", "agent"):            # who and which match, for the Colosseum; never shown to the player
             if labels and labels.get(k):
                 settings[k] = str(labels[k])
+        if labels and isinstance(labels.get("seat"), int):
+            settings["seat"] = labels["seat"]   # its place in the match (the relay order)
         token = secrets.token_urlsafe(24)
         with self.lock:
             rid = time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + "-" + secrets.token_hex(2)
@@ -348,6 +388,7 @@ class Store:
             run._emit({"t": "start", "settings": settings, "rulebook": rb, "fingerprint": run.fingerprint,
                        "start": run.world.start, "goal": run.world.goal})
             self.runs[rid] = run
+            self._join_team(run)
         return run, token
 
     def by_token(self, token):

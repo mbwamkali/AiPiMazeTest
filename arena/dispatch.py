@@ -43,6 +43,9 @@ def check_request(d):
     if out["seed"] is not None and not 0 <= out["seed"] < 2 ** 32:
         raise MatchError("seed must be between 0 and 4294967295")
     out["generator"] = str(d.get("generator") or "dfs")
+    out["team"] = str(d.get("team") or "solo")
+    if out["team"] not in ("solo", "together", "relay"):
+        raise MatchError("team is solo, together or relay")
     ants = d.get("ants")
     if not isinstance(ants, list) or not 1 <= len(ants) <= MAX_ANTS or \
             not all(isinstance(a, str) and NAME.match(a) for a in ants):
@@ -52,26 +55,36 @@ def check_request(d):
 
 
 class Dispatch:
-    def __init__(self, stop_run=None, clock=time.time):
+    def __init__(self, stop_run=None, clock=time.time, ended=None):
         self.lock = threading.Lock()
         self.agents = {}       # name -> {"seen": t, "busy": bool, "run": run id or None}
         self.queue = []        # {"run_id", "token", "agent", "match", "made", "status", "claimed"}
         self.stop_run = stop_run
         self.clock = clock
+        self.ended = ended or (lambda run_id: True)   # has this run ended? (a relay run waits for the one before)
 
     @staticmethod
     def new_match_id():
         return time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + "-m" + secrets.token_hex(2)
 
-    def add(self, agent, run_id, token, match_id):
+    def add(self, agent, run_id, token, match_id, after=None):
+        """Queue a run for an ant. With after (a run id), the run is handed out only once that run has ended."""
         with self.lock:
             self.queue.append({"run_id": run_id, "token": token, "agent": agent, "match": match_id,
-                               "made": self.clock(), "status": "waiting", "claimed": None})
+                               "made": self.clock(), "status": "waiting", "claimed": None, "after": after})
+
+    def _ready(self, q, now):
+        """A waiting run can be handed out (a relay run once the run before it has ended); its expiry clock
+        starts when it becomes ready."""
+        if q["after"] and not self.ended(q["after"]):
+            q["made"] = now
+            return False
+        return True
 
     def _expire(self, now):
         gone = []
         for q in self.queue:
-            if q["status"] == "waiting" and now - q["made"] > EXPIRE:
+            if q["status"] == "waiting" and self._ready(q, now) and now - q["made"] > EXPIRE:
                 q["status"], q["token"] = "missed", None
                 gone.append(q["run_id"])
         cutoff = now - 24 * 3600
@@ -92,7 +105,8 @@ class Dispatch:
             gone = self._expire(now)
             got = None
             if not busy:
-                got = next((q for q in self.queue if q["agent"] == name and q["status"] == "waiting"), None)
+                got = next((q for q in self.queue if q["agent"] == name and q["status"] == "waiting"
+                            and self._ready(q, now)), None)
                 if got:
                     got["status"], got["claimed"] = "claimed", now
                     a["run"] = got["run_id"]

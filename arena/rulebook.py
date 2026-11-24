@@ -9,6 +9,7 @@ import json
 
 from hypermaze.core import GENERATORS
 from .pen import DEFAULT_WEAR, SURFACES, WALL_SURFACES
+from .team import TEAM_MODES
 from .world import EDIT_TYPES
 
 DEFAULTS = {
@@ -25,8 +26,10 @@ DEFAULTS = {
     "pen_ink": 200000,                  # a full pen, in letters written on paper
     "wall_ink_per_letter": 10,          # a letter on a wall uses this much ink (times the surface's own factor)
     "wear": dict(DEFAULT_WEAR),         # tip condition lost per letter, per surface (overrides merge into this)
+    # the runs of one match: solo | together (shared walls, see each other, talk in the same room) | relay
+    "team": "solo",
 }
-PEN_KEYS = ("surfaces", "pen_ink", "wall_ink_per_letter", "wear")
+PEN_KEYS = ("surfaces", "pen_ink", "wall_ink_per_letter", "wear", "team")
 
 
 def _num(v):
@@ -76,6 +79,8 @@ def make(overrides=None):
         raise RuleError("pen_ink is a number >= 0")
     if not _num(rb["wall_ink_per_letter"]) or rb["wall_ink_per_letter"] < 0:
         raise RuleError("wall_ink_per_letter is a number >= 0")
+    if rb["team"] not in TEAM_MODES:
+        raise RuleError(f"team is one of {', '.join(TEAM_MODES)}")
     wear = rb["wear"]
     if not isinstance(wear, dict) or any(s not in SURFACES or not _num(x) or not 0 <= x <= 1 for s, x in wear.items()):
         raise RuleError("wear is {surface: tip lost per letter, 0..1}")
