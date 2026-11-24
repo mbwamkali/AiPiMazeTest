@@ -70,6 +70,20 @@ a { color: var(--dust); }
 .save { display: flex; gap: 6px; align-items: center; }
 .save input { width: 200px; }
 .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--stand-2); border: 1px solid var(--torch); padding: 8px 14px; border-radius: 6px; z-index: 5; }
+dialog.nm { background: var(--stand); color: var(--chalk); border: 1px solid var(--torch); border-radius: 8px; padding: 0; width: min(440px, calc(100vw - 32px)); }
+dialog.nm::backdrop { background: rgba(5,6,10,.7); }
+.nm form { display: grid; gap: 12px; padding: 16px 18px; }
+.nm h2 { font-family: var(--f-display); font-weight: 900; text-transform: uppercase; font-size: 1.4rem; margin: 0; }
+.nm .row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; align-items: center; }
+.nm .row > span { font-family: var(--f-mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--dust); }
+.nm input[type=number], .nm select { width: 100%; }
+.nm input[type=range] { width: 100%; accent-color: var(--torch); padding: 0; border: 0; background: transparent; }
+.nm .ants { display: grid; gap: 4px; }
+.nm .ants label { display: flex; gap: 8px; align-items: center; }
+.nm .ants small { color: var(--dust); }
+.nm .hint { font-size: .78rem; color: var(--dust); margin: 0; }
+.nm .btns { display: flex; justify-content: flex-end; gap: 8px; }
+.nm .go { background: var(--torch); color: #1b1408; border-color: var(--torch); }
 @media (max-width: 700px) { .stage { height: 62vh; } .hud { width: 46%; } .timeline { grid-template-columns: auto minmax(0, 1fr) auto; } .timeline .time, #golive { grid-column: span 1; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
 </style>
@@ -83,9 +97,24 @@ a { color: var(--dust); }
       <input id="savename" placeholder="Match name" maxlength="80" aria-label="Match name">
       <button id="save" type="button">Save match</button>
     </div>
+    <button id="newbtn" type="button" hidden>New match</button>
     <span class="spacer"></span>
     <a id="flat" href="flat">Flat view</a>
   </header>
+
+  <dialog class="nm" id="nm" aria-labelledby="nm-title">
+    <form method="dialog" id="nmform">
+      <h2 id="nm-title">New match</h2>
+      <label class="row"><span>Size</span><input id="nm-size" type="number" min="2" max="60" value="10" required></label>
+      <label class="row"><span>Loops <b id="nm-loopsv">10%</b></span><input id="nm-loops" type="range" min="0" max="50" step="5" value="10"></label>
+      <label class="row"><span>Seed</span><input id="nm-seed" type="number" min="0" max="4294967295" placeholder="random"></label>
+      <label class="row"><span>Max moves</span><input id="nm-max" type="number" min="0" max="100000" value="0" title="0 means no limit"></label>
+      <label class="row"><span>Generator</span><select id="nm-gen"><option value="dfs">dfs (long corridors)</option><option value="wilson">wilson (even)</option><option value="prim">prim (bushy)</option></select></label>
+      <div class="row"><span>Ants</span><div class="ants" id="nm-ants"><small>Looking for ants…</small></div></div>
+      <p class="hint">The keeper makes the maze, and each ant you pick starts on its own within a few seconds. A flat 2D maze; max moves 0 means no limit.</p>
+      <div class="btns"><button type="button" id="nm-cancel">Cancel</button><button type="submit" class="go" id="nm-go">Start match</button></div>
+    </form>
+  </dialog>
 
   <div class="stage" id="stage">
     <div class="tl"><span class="badge" id="badge">loading</span><span class="chip" id="info"></span><span class="chip" id="stats" hidden></span></div>
@@ -620,6 +649,36 @@ $('save').onclick = async () => {
   } catch (e) { toast('Not saved: ' + e.message); }
   $('save').disabled = false;
 };
+
+// ---------- new match ----------
+async function agents() { try { return await api('api/agents'); } catch (e) { return null; } }
+async function fillAnts() {
+  const box = $('nm-ants'), got = await agents();
+  const list = got ? got.agents : [];
+  if (!list.length) { box.innerHTML = '<small>No ants have checked in yet. Is the ant agent running?</small>'; return; }
+  box.innerHTML = list.map(a => { const state = !a.listening ? `not heard from for ${fmt(a.seen_ago)}` : a.busy ? 'playing a game' : 'listening';
+    return `<label><input type="checkbox" value="${esc(a.name)}" ${a.listening && !a.busy ? 'checked' : ''}> ${esc(a.name)} <small>${esc(state)}</small></label>`; }).join('');
+}
+$('nm-loops').oninput = () => { $('nm-loopsv').textContent = $('nm-loops').value + '%'; };
+$('newbtn').onclick = () => { fillAnts(); $('nm').showModal(); };
+$('nm-cancel').onclick = () => $('nm').close();
+$('nmform').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const ants = [...$('nm-ants').querySelectorAll('input:checked')].map(x => x.value);
+  if (!ants.length) { toast('Pick at least one ant.'); return; }
+  const body = { size: +$('nm-size').value, loops: +$('nm-loops').value / 100, max_moves: +$('nm-max').value || 0,
+                 generator: $('nm-gen').value, ants };
+  if ($('nm-seed').value !== '') body.seed = +$('nm-seed').value;
+  $('nm-go').disabled = true;
+  try { const r = await api('api/new-match', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    $('nm').close(); toast(`Match on: ${body.size}×${body.size}, seed ${r.seed}. Waiting for ${ants.join(', ')}.`);
+    const ids = r.runs.map(x => x.run_id).join(',');
+    const u = new URL(location.href); u.search = ''; u.searchParams.set('runs', ids); history.replaceState(null, '', u);
+    await boot();
+  } catch (e) { toast('Not started: ' + e.message); }
+  $('nm-go').disabled = false;
+});
+agents().then(g => { if (g) $('newbtn').hidden = false; });
 
 // ---------- controls ----------
 let camMode = 'orbit', PIP = false;

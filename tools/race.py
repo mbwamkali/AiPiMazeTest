@@ -2,7 +2,7 @@
 """Practice race: several ants on the same maze at once, played by the teacher bots.
 
 Starts one keeper run per ant on the same maze (same dims, size, loops and seed), then plays every run
-at the same time with the strategy bot each ant was trained on (ant/personas.py), so the Colosseum has
+at the same time with the strategy bot each ant was trained on (ant/bots.py), so the Colosseum has
 a race to show without any Pis or models. Each move posts the bot's line to the harness port, exactly
 like ant/pi_runner.py, so the viewer shows speech and names.
 
@@ -30,6 +30,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "runner"))
 from arena.auth import sign  # noqa: E402
+from ant import bots as B  # noqa: E402
 from ant import personas as P  # noqa: E402
 from hypermaze.core import Maze  # noqa: E402
 from hypermaze.game import Game  # noqa: E402
@@ -64,15 +65,15 @@ def play(persona, run, a, hkey, seed_rng, out):
     rng = random.Random(seed_rng)
     s = run["settings"]
     g = Game(Maze(s["dims"], s["size"], s["loops"], s["seed"], s.get("generator", "dfs")), mode="notes")
-    P.room_screen(g.intro())
+    B.room_screen(g.intro())
     last, turn, t0 = None, 0, time.time()
     time.sleep(rng.random() * a.pace)
     while not g.done and turn < a.max_turns:
         turn += 1
-        cmd, kind = P.decide(persona, g, last, rng)
+        cmd, kind = B.decide(persona, g, last, rng)
         if cmd is None:
             break
-        line = P.say(persona, kind, cmd, rng)
+        line = B.say(persona, kind, cmd, rng)
         if cmd != "map":
             r = walk(a.house, run["token"], cmd)
             if r.get("ended"):
@@ -80,7 +81,7 @@ def play(persona, run, a, hkey, seed_rng, out):
                 signed(a.report, hkey, "POST", f"/runs/{run['run_id']}/turn",
                        {"turn": turn, "sent": cmd, "reply": line, "where": persona, "speed": a.pace})
                 break
-        _, last = P.step(g, cmd, last)
+        _, last = B.step(g, cmd, last)
         signed(a.report, hkey, "POST", f"/runs/{run['run_id']}/turn",
                {"turn": turn, "sent": cmd, "reply": line, "where": persona, "speed": a.pace})
         time.sleep(a.pace * (0.7 + 0.6 * rng.random()) * (1.6 if kind in ("map", "nerves") else 1))

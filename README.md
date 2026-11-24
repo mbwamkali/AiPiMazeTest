@@ -158,6 +158,27 @@ scripts/hm config                # show every settings file, key/token-like valu
 with no work). `--dry-run` shows what any command would do.
 Details: [docs/setup.md](docs/setup.md#6-settings-files-and-services-hm).
 
+**Ant machines get only the ant.** Instead of `hm install ant` on a Pi, run on a machine with the full
+checkout:
+
+```bash
+scripts/hm deploy ant <ssh host>   # push only the ant's files (no installer, no git, nothing of the keeper
+                                   # or Colosseum), write its three units, (re)start its agent
+```
+
+It refuses while that ant is playing, and keeps the previous app folder as `~/hypermaze/app.prev-<time>`.
+`hypermaze-ant-agent.service` (starts at boot) asks the keeper's harness port every `poll_seconds`
+(default 5) whether a run is waiting for `agent_name` (default: the host name), and if so writes
+`run_file`/`token_file` and starts `hypermaze-ant`.
+
+## Starting matches from the Colosseum
+
+With `allow_new_matches = true` in `viewer.toml`, the Colosseum shows **New match**: size, loops, seed
+(blank = random), max moves, generator, and the ants whose agents have checked in. The keeper makes one
+run per ant on the same maze (`POST /admin/matches`) and keeps each run's token, in memory only, until
+that ant's agent asks for it; the agent gets the run id and token and nothing else. A run nobody picks
+up within 10 minutes is called off.
+
 ## Admin tools
 
 ```bash

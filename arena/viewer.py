@@ -18,11 +18,19 @@ after the keeper's run data is gone:
   GET  /api/matches/<id>         one saved match (maze + events of every run)
   POST /api/matches              {"name": "...", "runs": ["<run id>", ...]}  save a match
 
-Nothing reaches the keeper but reads: no edits, no stop, no new runs. Every other path is a plain 404 and
-every other method is refused.
+Starting matches (only with allow_new_matches = true in viewer.toml, or --allow-new-matches):
+
+  GET  /api/agents               the ants' agents the keeper has heard from, and runs waiting for them
+  POST /api/new-match            {"size", "loops", "seed", "max_moves", "generator", "ants": [names]}
+                                 the keeper makes one run per ant on the same maze; each ant's agent picks
+                                 its run up within a few seconds
+
+Apart from that nothing reaches the keeper but reads: no edits, no stop. Every other path is a plain 404
+and every other method is refused.
 
 Every request must carry the viewer key as ?key=... (the "viewer" entry in keys.json, or
 $ARENA_VIEWER_KEY); without it the answer is 401 and no maze data. The key only lets someone watch.
+With allow_new_matches it also lets them start matches.
 It is left out of the log. With --tls-cert/--tls-key the viewer speaks HTTPS.
 
   python3 -m arena.viewer --keeper http://127.0.0.1:7342 --listen 0.0.0.0:7344 \
@@ -59,13 +67,14 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class Relay:
-    def __init__(self, keeper, key, page, flat_page=None, matches_dir=None):
+    def __init__(self, keeper, key, page, flat_page=None, matches_dir=None, allow_new_matches=False):
         self.keeper, self.key, self.page = keeper.rstrip("/"), key, page
+        self.allow_new_matches = allow_new_matches
         self.flat_page = flat_page or page
         self.matches = Matches(matches_dir) if matches_dir else None
         self.lock, self.last = threading.Lock(), {}
 
-    def _sign(self, path):
+    def _sign(self, path, method="GET", body=b""):
         # The keeper accepts each signature once, and a signature covers (method, path, whole second).
         # Two viewers asking for the same path in the same second would collide, so the second one is stamped
         # a second later (the keeper accepts stamps up to 60 s off).
@@ -74,12 +83,20 @@ class Relay:
             self.last[path] = now
             if len(self.last) > 500:
                 self.last = {k: v for k, v in self.last.items() if v >= now - 120}
-        return sign(self.key, "GET", path, ts=now)
+        return sign(self.key, method, path, body, ts=now)
 
     def get(self, path, timeout=20):
         ts, sig = self._sign(path)
         req = urllib.request.Request(self.keeper + path, headers={"X-Time": ts, "X-Signature": sig})
         return urllib.request.urlopen(req, timeout=timeout)
+
+    def post_json(self, path, obj, timeout=60):
+        body = json.dumps(obj).encode()
+        ts, sig = self._sign(path, "POST", body)
+        req = urllib.request.Request(self.keeper + path, body, {"Content-Type": "application/json",
+                                                                "X-Time": ts, "X-Signature": sig})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
 
     def get_json(self, path):
         with self.get(path) as r:
@@ -205,6 +222,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, self.relay.matches.read(m.group(1)))
                 except OSError:
                     return self._404()
+            if path == "/api/agents":
+                if not self.relay.allow_new_matches:
+                    return self._404()
+                return self._send(200, json.dumps(self.relay.get_json("/admin/agents")).encode())
             if path == "/api/runs":
                 with self.relay.get("/admin/runs") as r:
                     runs = json.loads(r.read())["runs"]
@@ -256,6 +277,8 @@ class Handler(BaseHTTPRequestHandler):
         path, _, query = self.path.partition("?")
         if not self._key_ok(query):
             return self._send(401, b'{"error":"viewer key needed"}')
+        if path == "/api/new-match" and self.relay.allow_new_matches:
+            return self._new_match()
         if path != "/api/matches" or not self.relay.matches:
             return self._refuse()
         try:
@@ -280,6 +303,29 @@ class Handler(BaseHTTPRequestHandler):
         except (urllib.error.URLError, OSError, KeyError):
             return self._send(502, b'{"error":"keeper unreachable"}')
         return self._send(201, json.dumps(saved).encode())
+
+    def _new_match(self):
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > 4000:
+                raise ValueError
+            body = json.loads(self.rfile.read(n) or b"{}")
+            if not isinstance(body, dict):
+                raise ValueError
+            keep = {k: body[k] for k in ("size", "loops", "seed", "max_moves", "generator", "ants") if k in body}
+        except (ValueError, TypeError):
+            return self._send(400, b'{"error":"bad request"}')
+        try:
+            made = self.relay.post_json("/admin/matches", keep)
+        except urllib.error.HTTPError as e:
+            try:
+                err = json.loads(e.read()).get("error") or "refused"
+            except (ValueError, OSError, AttributeError):
+                err = "refused"
+            return self._send(400 if e.code == 400 else 502, json.dumps({"error": err}).encode())
+        except (urllib.error.URLError, OSError, ValueError):
+            return self._send(502, b'{"error":"keeper unreachable"}')
+        return self._send(201, json.dumps(made).encode())
 
     def _refuse(self):
         self._send(405, b'{"error":"read only"}')
@@ -345,6 +391,8 @@ def main(argv=None):
     ap.add_argument("--matches-dir", help="where saved matches go (default ~/hypermaze/colosseum/matches)")
     ap.add_argument("--tls-cert", help="certificate (chain) file: serve HTTPS")
     ap.add_argument("--tls-key", help="private key for --tls-cert")
+    ap.add_argument("--allow-new-matches", action="store_true", default=None,
+                    help="let the page start matches (the keeper makes the runs; ants' agents pick them up)")
     ap.add_argument("--public-host", help="host[:port] to redirect http:// visitors to when their Host header is unusable")
     a = ap.parse_args(argv)
     cfg = config.load_or_exit("viewer", a.config)
@@ -356,6 +404,7 @@ def main(argv=None):
     matches_dir = config.pick(a.matches_dir, None, cfg, "matches_dir", "~/hypermaze/colosseum/matches")
     tls_cert = config.pick(a.tls_cert, None, cfg, "tls_cert")
     tls_key = config.pick(a.tls_key, None, cfg, "tls_key")
+    allow_new = bool(config.pick(a.allow_new_matches, None, cfg, "allow_new_matches", False))
     host, port = listen.rsplit(":", 1)
     public_host = config.pick(a.public_host, None, cfg, "public_host",
                               f"{'127.0.0.1' if host in ('', '0.0.0.0', '::') else host}:{port}")
@@ -365,7 +414,7 @@ def main(argv=None):
     vkey = os.environ.get("ARENA_VIEWER_KEY") or keys.get("viewer", "")
     if not vkey:
         sys.exit("no viewer key: add \"viewer\" to keys.json or set ARENA_VIEWER_KEY")
-    handler = type("H", (Handler,), {"relay": Relay(keeper, key, page, flat_page, matches_dir), "viewer_key": vkey})
+    handler = type("H", (Handler,), {"relay": Relay(keeper, key, page, flat_page, matches_dir, allow_new), "viewer_key": vkey})
     scheme = "http"
     if tls_cert:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -376,7 +425,8 @@ def main(argv=None):
     else:
         srv = ThreadingHTTPServer((host, int(port)), handler)
     srv.daemon_threads = True
-    print(f"viewer relay on {scheme}://{listen} -> {keeper} (viewer key required)", file=sys.stderr, flush=True)
+    print(f"viewer relay on {scheme}://{listen} -> {keeper} (viewer key required"
+          f"{'; can start matches' if allow_new else ''})", file=sys.stderr, flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

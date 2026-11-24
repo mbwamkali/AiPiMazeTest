@@ -24,11 +24,11 @@
 # max_turns = 600
 # quiet = false
 
-# --- the keeper ---
-# Contestant URL (the house) and harness URL (where turns are posted).
-# house = "https://<keeper-host>:7341"
-# report = "https://<keeper-host>:7343"
-# CA certificate for the keeper's TLS ($SSL_CERT_FILE wins over this).
+# --- the house ---
+# The house URL, and the report URL (where turns are posted).
+# house = "https://<house-host>:7341"
+# report = "https://<house-host>:7343"
+# CA certificate for the house's TLS ($SSL_CERT_FILE wins over this).
 # ca_cert = "~/hypermaze/ca.crt"
 
 # --- secrets, by path only ---
@@ -38,3 +38,9 @@
 # token_file = "~/hypermaze/run.token"
 # File with this run's id (--run wins over this).
 # run_file = "~/hypermaze/run.id"
+
+# --- the agent (hypermaze-ant-agent: asks the report URL for the next game and starts it) ---
+# Name this machine goes by (default: its host name).
+# agent_name = "pi-one"
+# Seconds between asks.
+# poll_seconds = 5

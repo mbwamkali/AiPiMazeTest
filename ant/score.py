@@ -21,6 +21,7 @@ from hypermaze import Game, Maze
 from hypermaze.harness import candidates
 
 from . import compact as C
+from . import bots as B
 from . import personas as P
 from .lessons import SYSTEM_QUIET, SYSTEM_TALK, decide, maze_mix, room_screen
 
@@ -110,7 +111,7 @@ class Run:
         elif self.last and self.last[0] == "walk" and self.last[2] and move.lower() == self.last[1].lower():
             self.returns += 1
         self.lines.append(f"[{here}] {reason}  -> GO: {move}" if reason else f"[{here}] -> GO: {move}")
-        self.screen, self.last = P.step(self.g, move, self.last)
+        self.screen, self.last = B.step(self.g, move, self.last)
 
     def result(self):
         g = self.g

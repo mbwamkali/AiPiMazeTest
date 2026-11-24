@@ -15,8 +15,12 @@ Admin port (signed requests only; firewalled from the runner's machine):
   POST /admin/runs/<id>/edits         {"edit": {...}, "by": "director", "why": "..."}
   POST /admin/runs/<id>/edits/preview same, without applying
   POST /admin/runs/<id>/stop          {"farewell": "..."}
+  POST /admin/matches                 {"size", "loops", "seed", "max_moves", "generator", "ants": [names]}
+                                      one run per ant on the same maze, each waiting for that ant's agent
+  GET  /admin/agents                  ants' agents heard from, and the runs waiting for them (no tokens)
 Harness port (signed with the harness key; open to the harness on the runner's machine):
   POST /runs/<id>/turn                one turn of the LLM harness: what it was shown and what it sent
+  POST /agents/<name>/next {"busy": b}  an ant's agent asks for work -> {"run_id", "token"} or {"run_id": null}
 Each port only accepts its own key. Anything unknown, unauthorised or malformed in the URL gets the same plain 404.
 With --tls-cert/--tls-key the contestant and harness ports speak HTTPS only (the admin port stays plain HTTP,
 meant for 127.0.0.1). Without them nothing changes.
@@ -30,6 +34,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import auth
+from .dispatch import Dispatch, MatchError, check_request
 from .rulebook import RuleError
 from .runs import Store
 
@@ -45,6 +50,26 @@ class Keeper:
         self.verifier = auth.Verifier()
         self.access_log = access_log
         self.log_lock = threading.Lock()
+        self.dispatch = Dispatch(stop_run=self._missed)
+
+    def _missed(self, run_id):
+        run = self.store.runs.get(run_id)
+        if run:
+            run.stop("This game was called off.")
+
+    def new_match(self, data):
+        req = check_request(data)
+        match_id = Dispatch.new_match_id()
+        seed, made = req["seed"], []
+        rb = {"generator": req["generator"], "max_moves": req["max_moves"]}
+        for ant in req["ants"]:
+            run, token = self.store.create(2, req["size"], req["loops"], seed, rb, {"match": match_id, "agent": ant})
+            seed = run.settings["seed"]
+            made.append((ant, run, token))
+        for ant, run, token in made:
+            self.dispatch.add(ant, run.id, token, match_id)
+        self.note(f"match {match_id}: {len(made)} run(s), size {req['size']} loops {req['loops']} seed {seed}")
+        return {"match": match_id, "seed": seed, "runs": [{"run_id": r.id, "agent": a} for a, r, _ in made]}
 
     def note(self, line):
         if self.access_log:
@@ -164,6 +189,8 @@ class AdminHandler(_Base):
         ok, path = self._auth(b"")
         if not ok:
             return self._404("admin auth")
+        if path == "/admin/agents":
+            return self._send(200, self.keeper.dispatch.view())
         run, sub = self._route(path)
         if run is False:
             return self._404("path")
@@ -217,6 +244,11 @@ class AdminHandler(_Base):
         ok, path = self._auth(body)
         if not ok:
             return self._404("admin auth")
+        if path == "/admin/matches":
+            try:
+                return self._send(200, self.keeper.new_match(json.loads(body or b"{}")))
+            except (MatchError, RuleError, ValueError, TypeError) as e:
+                return self._send(400, {"error": str(e)})
         run, sub = self._route(path)
         if run is False:
             return self._404("path")
@@ -248,6 +280,7 @@ class HarnessHandler(AdminHandler):
     """Only POST /runs/<id>/turn, signed with the harness key."""
     role = "harness"
     TURN = re.compile(r"^/runs/([0-9A-Za-z-]+)/turn$")
+    AGENT = re.compile(r"^/agents/([a-z0-9][a-z0-9-]{0,31})/next$")
 
     def do_GET(self):
         self._404("path")
@@ -258,6 +291,15 @@ class HarnessHandler(AdminHandler):
         except ValueError:
             return self._404("body")
         ok, path = self._auth(body)
+        ag = self.AGENT.match(path) if ok else None
+        if ag:
+            try:
+                data = json.loads(body or b"{}")
+                if not isinstance(data, dict):
+                    raise ValueError
+            except ValueError:
+                return self._send(400, {"error": "bad_request"})
+            return self._send(200, self.keeper.dispatch.take(ag.group(1), data.get("busy", True)))
         m = self.TURN.match(path) if ok else None
         run = self.keeper.store.runs.get(m.group(1)) if m else None
         if not run:

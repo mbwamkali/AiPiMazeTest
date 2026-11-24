@@ -242,13 +242,16 @@ class Store:
         run.events = events
         return run
 
-    def create(self, dims=2, size=8, loops=0.0, seed=None, rulebook=None):
+    def create(self, dims=2, size=8, loops=0.0, seed=None, rulebook=None, labels=None):
         rb = rules.make(rulebook)
         if seed is None:
             seed = secrets.randbits(32)
         maze = Maze(int(dims), int(size), float(loops), int(seed), rb["generator"])
         settings = {"dims": maze.dims, "size": maze.size, "loops": maze.loops, "seed": maze.seed,
                     "rooms": maze.n, "shortest": maze.shortest, "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        for k in ("match", "agent"):            # who and which match, for the Colosseum; never shown to the player
+            if labels and labels.get(k):
+                settings[k] = str(labels[k])
         token = secrets.token_urlsafe(24)
         with self.lock:
             rid = time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + "-" + secrets.token_hex(2)

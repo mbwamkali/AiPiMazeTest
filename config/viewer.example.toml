@@ -27,3 +27,7 @@
 
 # Where saved matches are kept, on this machine only (default ~/hypermaze/colosseum/matches).
 # matches_dir = "~/hypermaze/colosseum/matches"
+
+# Let the page start matches: the keeper makes one run per chosen ant, and each ant's agent picks
+# its run up. Anyone with the viewer key can then start matches. Default false.
+# allow_new_matches = true

@@ -1,7 +1,7 @@
-"""The ant's memory, kept only in its notebook on the keeper.
+"""The ant's memory, kept only in its notebook in the house.
 
 The house shows the ant nothing but the room it stands in and that room's doors. Everything the
-ant remembers lives in its notebook, which the keeper stores (so the Colosseum can watch it fill):
+ant remembers lives in its notebook, which the house keeps for it:
 
   ROOM: Coral Tower | doors: Iron Den; Jade Foyer; Way Out     written on arrival when the doors are new to it
   MOVE: Coral Tower -> Iron Den                               written after every move
