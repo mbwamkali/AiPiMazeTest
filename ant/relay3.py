@@ -30,6 +30,7 @@ from . import personas as P
 from . import view3 as V
 
 READABLE = 0.25
+GOOD_WALLS = ("wood", "plaster")   # the strict teacher only writes trail notes on these (learned from outcomes)
 
 
 def readable(line, intended):
@@ -55,6 +56,7 @@ class Player:
         self.trailing = False     # going back to mark the way
         self.marked = False       # it has already marked the way
         self.wrote = set()        # rooms where it already tried to write its trail note
+        self.followed = set()     # (room, door) "out" notes it already followed
         self.following = False
         self.prev = None
         self.last = None          # for the "Last action" line
@@ -78,6 +80,16 @@ class Player:
                 self.visited.add(room)
                 if frm is not None:
                     self.came[room] = frm
+
+    def chain(self):
+        """Rooms from the start room to here along "first came from" (its own notebook), or None."""
+        out, c = [self.pos], self.pos
+        while c in self.came:
+            c = self.came[c]
+            if c in out:
+                return None
+            out.append(c)
+        return out[::-1] if c == self.m.start else None
 
     def known(self, room):
         return self.m.adj[room] if room == self.pos else self.doors.get(room, ())
@@ -108,7 +120,8 @@ class Player:
 
 
 class RelayGame:
-    def __init__(self, maze, ants=1, mix=None, seed=0, pen_ink=200000, wear=None, cap_factor=8, briefing="team"):
+    def __init__(self, maze, ants=1, mix=None, seed=0, pen_ink=200000, wear=None, cap_factor=8, briefing="team",
+                 teacher="tagged"):
         """briefing: "team"  each ant is told once, as it comes in, how many come after it, and writes it on page 1
                      "size"  told once only the team's size ("you are one of 3"), not its place in line
                      "none"  told nothing about the team: going back to mark the way is offered at every Way Out"""
@@ -120,6 +133,11 @@ class RelayGame:
         self.cap = cap_factor * maze.n
         self.turns = 0
         self.briefing = briefing
+        # strict: every move the teacher makes is justified by the screen alone (no worked-out door tags):
+        #   explore new doors, go back only through "you first came from here", mark the way back from the
+        #   Way Out along that same chain with a note in every room, and walk out by following "out" notes.
+        # tagged: the code tags the door toward the nearest untried room / along the known route (v3b-style).
+        self.teacher = teacher
         n = len(self.players)
         for i, p in enumerate(self.players):
             p.after, p.team_size = None, None
@@ -163,11 +181,30 @@ class RelayGame:
         if a.trailing and a.route and cur in a.route:
             k = a.route.index(cur)
             note = f"out {names[a.route[k + 1]]}"
-            if (len(m.adj[cur]) >= 3 or cur == m.start) and note not in self.marks.get(cur, []) \
+            # tagged: junctions and the start. strict: every room, so the marker can walk out by its own notes
+            spot = self.teacher == "strict" or len(m.adj[cur]) >= 3 or cur == m.start
+            if spot and note not in self.marks.get(cur, []) \
                     and cur not in a.wrote:                      # one try per room
                 write = note
+        hints = {}
+        if self.teacher == "strict":
+            pass                                   # nothing worked out for it: the screen as it is
+        elif a.trailing and a.route and cur in a.route and cur != m.start:
+            hints[names[a.route[a.route.index(cur) - 1]]] = "back toward the start (marking the way)"
+        elif a.route and not a.trailing:
+            p = a.path(m.goal, a.route)
+            if p and len(p) > 1 and p[1] != m.goal:
+                hints[names[p[1]]] = "toward the Way Out (your route)"
+        elif a.following:
+            ahead = [x for x in m.adj[cur] if x != a.prev and (cur, x) not in a.tried]
+            if len(m.adj[cur]) == 2 and ahead:
+                hints[names[ahead[0]]] = "on along the trail"
+        if self.teacher != "strict" and not hints and not a.fresh(cur):
+            p = a.path(None, frontier=True)
+            if p and len(p) > 1:
+                hints[names[p[1]]] = "toward rooms with untried paths"
         text, options = V.view(names[cur], doors, untried, came, open_, a.last, walls=self.surfaces[cur],
-                               marks=self.marks.get(cur, []), write=write)
+                               marks=self.marks.get(cur, []), write=write, hints=hints)
         extra = []
         if a.bad:
             extra.append("Your notes: notes on " + ", ".join(sorted(s.replace("_", " ") for s in a.bad))
@@ -177,17 +214,22 @@ class RelayGame:
         if a.team_size:
             extra.append(f"Your notes: you are one of {a.team_size} ants")
         if self.offer_mark():
-            back = len(a.path(m.start) or [cur]) - 1
+            back = self.back_len(a)
             extra.append(f"B - go back and mark the way for the ants still to come "
                          f"(the way back to the start: {back} rooms; you took {a.moves} moves to get here)")
             options["B"] = ("mark",)
         if a.trailing and a.route and cur in a.route and cur != m.start:
-            k = a.route.index(cur)
-            extra.append(f"Marking the way: the start room is back through {names[a.route[k - 1]]}")
+            extra.append("Marking the way back to the start")
         if extra:
             lines = text.split("\n")
             text = "\n".join(lines[:-2] + extra + lines[-2:])
         return text, options
+
+    def back_len(self, a):
+        if self.teacher == "strict":
+            c = a.chain()
+            return len(c) - 1 if c else len(a.path(self.m.start) or [a.pos]) - 1
+        return len(a.path(self.m.start) or [a.pos]) - 1
 
     # ---- the lesson bot --------------------------------------------------------------
     def teach(self):
@@ -196,6 +238,8 @@ class RelayGame:
         text, options = self.screen()
         by_door = {v[1]: k for k, v in options.items() if v[0] == "go"}
         names, cur = m.names, a.pos
+        if self.teacher == "strict":
+            return self.teach_strict(text, options, by_door)
         if "B" in options:
             back = len(a.path(m.start) or [cur]) - 1
             followers = a.after if a.after is not None else \
@@ -236,6 +280,41 @@ class RelayGame:
             return by_door[names[p[1]]], "back"
         return by_door[names[random.Random(f"{a.seed}:{a.moves}:{cur}").choice(m.adj[cur])]], "lost"
 
+    def teach_strict(self, text, options, by_door):
+        a, m = self.cur, self.m
+        names, cur = m.names, a.pos
+        if "B" in options:
+            back = self.back_len(a)
+            followers = a.after if a.after is not None else \
+                (a.team_size - 1) / 2 if a.team_size else 1
+            if followers * (a.moves - back) > 2 * back + 2:
+                return "B", "mark"
+            return by_door[names[m.goal]], "goal"
+        if a.trailing:
+            if "W" in options and self.surfaces[cur] not in a.bad and self.surfaces[cur] in GOOD_WALLS:
+                return "W", "write_out"                         # rough or wet walls: walk on, save the pen
+            if cur in a.came:                                   # back the way it first came in
+                return by_door[names[a.came[cur]]], "back_trail"
+        if names[m.goal] in by_door:
+            return by_door[names[m.goal]], "goal"
+        notes = V.read_notes(self.marks.get(cur, []), list(by_door))
+        for d, kinds in sorted(notes.items()):
+            if "out" in kinds and m.find(d) != a.prev and (cur, m.find(d)) not in a.followed:
+                return by_door[d], "follow"          # each note followed once, so two trails can't loop
+        fresh = a.fresh(cur)
+        if fresh:
+            order = sorted(fresh, key=lambda x: (names[x].lower(), names[x]))
+            pi = P.NAMES.index(a.persona) if a.persona in P.NAMES else 0
+            pick = order[-1] if pi == 0 else order[0] if pi == 1 else \
+                random.Random(f"{a.seed}:{a.moves}:{cur}").choice(order)
+            return by_door[names[pick]], "new_more" if len(fresh) > 1 else "new"
+        if cur in a.came:
+            return by_door[names[a.came[cur]]], "back"
+        loop = [x for x in m.adj[cur] if (cur, x) not in a.tried]          # "untried, leads to a known room"
+        if loop:
+            return by_door[names[sorted(loop, key=lambda x: names[x])[0]]], "lost"
+        return by_door[names[random.Random(f"{a.seed}:{a.moves}:{cur}").choice(m.adj[cur])]], "lost"
+
     # ---- doing it --------------------------------------------------------------------
     def apply(self, action):
         a, m = self.cur, self.m
@@ -244,7 +323,8 @@ class RelayGame:
             a.last = ("map",)
             return
         if action[0] == "mark":
-            a.route = (a.path(m.start) or [a.pos])[::-1] + [m.goal]
+            c = a.chain() if self.teacher == "strict" else None
+            a.route = (c if c else (a.path(m.start) or [a.pos])[::-1]) + [m.goal]
             a.trailing = True
             a.last = ("mark",)
             return
@@ -268,6 +348,8 @@ class RelayGame:
             return
         frm = a.pos
         followed = any("out" in k for d, k in V.read_notes(self.marks.get(frm, []), [action[1]]).items())
+        if followed:
+            a.followed.add((frm, to))
         a.following = followed or (a.following and len(m.adj[frm]) == 2)
         left_new = bool(a.fresh(frm)) and to in a.visited
         a.prev, a.pos = frm, to
