@@ -5,8 +5,13 @@ Ants come into one maze one after another. Each plays blind with its own pen and
 note as it came out. When an ant reaches the Way Out while ants are still to come, it may go back
 and mark the way: it walks back along its route toward the start room, writing "out <room>" at every
 junction and in the start room, then turns round and leaves. A later ant follows "out" notes.
-An ant that sees one of its wall notes fail (nothing showed, or letters lost) stops writing on that
-material, and keeps that in its notes.
+An ant that sees one of its wall notes fail (nothing showed, or letters lost) writes that in its notebook
+("WALLS: ice walls did not take my note") and stops writing on that material.
+
+Team briefing (the hard rule allows nothing about teammates outside the room): as each ant comes in it is
+told once how many ants come in after it, and writes "TEAM: 2 ants come in after me" on page 1. The
+screen shows that from its notebook, and going back to mark the way is offered at the Way Out only when
+its notebook says ants come after.
 
 The screen each turn is ant/view3.py's, built only from what the ant could see or remembers.
 Teacher (the lesson bot): RelayGame.teach() gives the key it would answer, and a kind for comments.
@@ -102,7 +107,9 @@ class Player:
 
 
 class RelayGame:
-    def __init__(self, maze, ants=1, mix=None, seed=0, pen_ink=200000, wear=None, cap_factor=8):
+    def __init__(self, maze, ants=1, mix=None, seed=0, pen_ink=200000, wear=None, cap_factor=8, briefing="team"):
+        """briefing: "team"  each ant is told once, as it comes in, how many come after it, and writes it on page 1
+                     "none"  told nothing about the team: going back to mark the way is offered at every Way Out"""
         self.m = maze
         self.surfaces = assign_surfaces(maze.n, seed, mix or {})
         self.marks = {}
@@ -110,6 +117,10 @@ class RelayGame:
         self.k = 0                 # the ant now in the house
         self.cap = cap_factor * maze.n
         self.turns = 0
+        self.briefing = briefing
+        for i, p in enumerate(self.players):
+            after = len(self.players) - i - 1
+            p.after = after if briefing == "team" and p._paper(f"TEAM: {after} ants come in after me") else None
 
     @property
     def done(self):
@@ -120,7 +131,14 @@ class RelayGame:
         return self.players[self.k]
 
     def to_come(self):
-        return len(self.players) - self.k - 1
+        """What the ant knows of the ants coming after it: its own briefing note (None if it has none)."""
+        return self.cur.after
+
+    def offer_mark(self):
+        a = self.cur
+        if a.marked or a.trailing or self.m.goal not in self.m.adj[a.pos]:
+            return False
+        return self.briefing == "none" or bool(a.after)
 
     # ---- what the ant sees ----------------------------------------------------------
     def screen(self):
@@ -147,9 +165,9 @@ class RelayGame:
         if a.bad:
             extra.append("Your notes: notes on " + ", ".join(sorted(s.replace("_", " ") for s in a.bad))
                          + " walls did not come out")
-        if self.to_come():
-            extra.append(f"Ants still to come after you: {self.to_come()}")
-        if m.goal in m.adj[cur] and self.to_come() and not a.marked and not a.trailing:
+        if a.after:
+            extra.append(f"Your notes: {a.after} ants come in after you")
+        if self.offer_mark():
             back = len(a.path(m.start) or [cur]) - 1
             extra.append(f"B - go back and mark the way for the ants still to come "
                          f"(the way back to the start: {back} rooms; you took {a.moves} moves to get here)")
@@ -171,7 +189,8 @@ class RelayGame:
         names, cur = m.names, a.pos
         if "B" in options:
             back = len(a.path(m.start) or [cur]) - 1
-            if self.to_come() * (a.moves - back) > 2 * back + 2:      # worth the walk for the ants to come
+            followers = a.after if a.after is not None else 1          # unbriefed: hope for one
+            if followers * (a.moves - back) > 2 * back + 2:           # worth the walk for the ants to come
                 return "B", "mark"
             return by_door[names[m.goal]], "goal"
         if a.trailing:
@@ -227,8 +246,9 @@ class RelayGame:
             a.writes += 1
             if line:
                 self.marks.setdefault(a.pos, []).append(line)
-            if not readable(line, text) or LOST in line:
-                a.bad.add(surf)
+            if (not readable(line, text) or LOST in line) and \
+                    a._paper(f"WALLS: {surf.replace('_', ' ')} walls did not take my note"):
+                a.bad.add(surf)                      # remembered only if that notebook line came out
             a.last = ("wrote", line)
             return
         to = m.find(action[1])
