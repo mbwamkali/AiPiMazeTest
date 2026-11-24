@@ -56,6 +56,8 @@ def last_text(last):
     """The "Last action" line: the v2 forms plus writing on a wall and deciding to mark the way."""
     if last and last[0] == "wrote":
         return ("Last action: wrote on the wall; " + (f'it came out: "{last[1]}"' if last[1] else "nothing showed") + ".")
+    if last and last[0] == "trail":
+        return f"Last action: followed the trail here from {last[1]}."
     if last and last[0] == "mark":
         return "Last action: decided to go back and mark the way."
     return P.last_text(last)

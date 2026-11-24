@@ -57,6 +57,7 @@ class Player:
         self.marked = False       # it has already marked the way
         self.wrote = set()        # rooms where it already tried to write its trail note
         self.followed = set()     # (room, door) "out" notes it already followed
+        self.route_note = None    # its route, if it wrote a readable ROUTE line in its notebook (strictR)
         self.following = False
         self.prev = None
         self.last = None          # for the "Last action" line
@@ -187,7 +188,11 @@ class RelayGame:
                     and cur not in a.wrote:                      # one try per room
                 write = note
         hints = {}
-        if self.teacher == "strict":
+        if self.teacher == "strictR" and a.route_note and not a.trailing:
+            k = a.route_note.index(cur) if cur in a.route_note else None
+            if k is not None and k + 1 < len(a.route_note) - 1:
+                hints[names[a.route_note[k + 1]]] = "your ROUTE note goes this way"   # read back from its notebook
+        elif self.teacher.startswith("strict"):
             pass                                   # nothing worked out for it: the screen as it is
         elif a.trailing and a.route and cur in a.route and cur != m.start:
             hints[names[a.route[a.route.index(cur) - 1]]] = "back toward the start (marking the way)"
@@ -226,7 +231,7 @@ class RelayGame:
         return text, options
 
     def back_len(self, a):
-        if self.teacher == "strict":
+        if self.teacher.startswith("strict"):
             c = a.chain()
             return len(c) - 1 if c else len(a.path(self.m.start) or [a.pos]) - 1
         return len(a.path(self.m.start) or [a.pos]) - 1
@@ -238,7 +243,7 @@ class RelayGame:
         text, options = self.screen()
         by_door = {v[1]: k for k, v in options.items() if v[0] == "go"}
         names, cur = m.names, a.pos
-        if self.teacher == "strict":
+        if self.teacher.startswith("strict"):
             return self.teach_strict(text, options, by_door)
         if "B" in options:
             back = len(a.path(m.start) or [cur]) - 1
@@ -297,10 +302,17 @@ class RelayGame:
                 return by_door[names[a.came[cur]]], "back_trail"
         if names[m.goal] in by_door:
             return by_door[names[m.goal]], "goal"
+        for d, k in by_door.items():
+            if "your ROUTE note goes this way" in next((l for l in text.split("\n") if l.startswith(k + " ")), ""):
+                return k, "route"
         notes = V.read_notes(self.marks.get(cur, []), list(by_door))
         for d, kinds in sorted(notes.items()):
             if "out" in kinds and m.find(d) != a.prev and (cur, m.find(d)) not in a.followed:
                 return by_door[d], "follow"          # each note followed once, so two trails can't loop
+        if self.teacher == "strictC" and a.last and a.last[0] == "trail" and len(m.adj[cur]) == 2:
+            ahead = [x for x in m.adj[cur] if x != a.prev]
+            if ahead:
+                return by_door[names[ahead[0]]], "follow_on"     # "Last action: followed the trail here"
         fresh = a.fresh(cur)
         if fresh:
             order = sorted(fresh, key=lambda x: (names[x].lower(), names[x]))
@@ -323,8 +335,10 @@ class RelayGame:
             a.last = ("map",)
             return
         if action[0] == "mark":
-            c = a.chain() if self.teacher == "strict" else None
+            c = a.chain() if self.teacher.startswith("strict") else None
             a.route = (c if c else (a.path(m.start) or [a.pos])[::-1]) + [m.goal]
+            if self.teacher == "strictR" and a._paper("ROUTE: " + " > ".join(m.names[x] for x in a.route)):
+                a.route_note = list(a.route)
             a.trailing = True
             a.last = ("mark",)
             return
@@ -350,11 +364,13 @@ class RelayGame:
         followed = any("out" in k for d, k in V.read_notes(self.marks.get(frm, []), [action[1]]).items())
         if followed:
             a.followed.add((frm, to))
+        on_trail = followed or (self.teacher == "strictC" and a.last and a.last[0] == "trail"
+                                and len(m.adj[frm]) == 2)
         a.following = followed or (a.following and len(m.adj[frm]) == 2)
         left_new = bool(a.fresh(frm)) and to in a.visited
         a.prev, a.pos = frm, to
         a.moves += 1
-        a.last = ("walk", m.names[frm], left_new)
+        a.last = ("trail", m.names[frm]) if self.teacher == "strictC" and on_trail else ("walk", m.names[frm], left_new)
         if to == m.goal:
             a.out = True
             self.k += 1
