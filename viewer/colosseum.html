@@ -45,6 +45,7 @@ a { color: var(--dust); }
 .hrow.win { border-color: var(--torch); }
 .hrow i { width: 12px; height: 12px; border-radius: 50%; }
 .hrow b { font-family: var(--f-display); font-weight: 800; font-size: 1.05rem; text-transform: uppercase; line-height: 1; }
+.hrow small.pace { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
 .hrow small { display: block; font-size: .68rem; color: var(--dust); }
 .hrow span { font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-size: 1rem; }
 .hrow .bar { grid-column: 2 / 4; height: 3px; background: var(--stand-2); border-radius: 2px; overflow: hidden; }
@@ -430,17 +431,20 @@ function makeAnts(runs) {
   const used = new Set();
   return runs.map((r, k) => {
     const who = (r.events.find(e => e.t === 'harness' && e.where) || {}).where || null;
-    const name = who || `Ant ${k + 1}`;
+    // the ant's machine name (the run's agent, from the start event) leads; the persona it plays goes underneath
+    const st = r.events.find(e => e.t === 'start'), agent = (st && st.settings && st.settings.agent) || null;
+    const name = agent || who || `Ant ${k + 1}`;
     let color = COLORS[who]; if (!color || used.has(color)) color = SPARE[(hashName(r.run) + k) % SPARE.length]; used.add(color);
     const offs = [[-.12, -.08], [.12, -.08], [0, .13], [-.13, .1], [.13, .1], [0, -.15]];
-    return { run: r.run, name, color, off: offs[k % offs.length], events: r.events, moves: [], says: [], end: null, edits: [], k,
+    return { run: r.run, name, color, off: offs[k % offs.length], events: r.events, moves: [], says: [], end: null, edits: [], think: {}, k, persona: agent ? who : null,
              idx: -1, sayIdx: -1, visited: new Set(), bubble: null, status: 'At the gate', done: 0 };
   });
 }
 function ingest(a, ev) {
   const t = (ev.t_wall || 0) - T0;
   if (ev.t === 'walk') { const prev = a.moves.length ? a.moves[a.moves.length - 1].to : M.start; a.moves.push({ t, from: ev.from ?? prev, to: ev.to, n: ev.n, dist: ev.dist, result: ev.result }); }
-  else if (ev.t === 'harness' && ev.reply) { a.says.push({ t, text: String(ev.reply).replace(/GO:.*$/m, '').trim() }); if (ev.where && a.name.startsWith('Ant ')) a.name = ev.where; }
+  if (ev.t === 'harness' && ev.turn != null && ev.speed != null) a.think[ev.turn] = +ev.speed;
+  if (ev.t === 'harness' && ev.reply) { a.says.push({ t, text: String(ev.reply).replace(/GO:.*$/m, '').trim() }); if (ev.where && a.name.startsWith('Ant ')) a.name = ev.where; else if (ev.where && !a.persona && ev.where !== a.name) a.persona = ev.where; }
   else if (ev.t === 'end') a.end = { t, result: ev.result, moves: ev.moves };
   else if (ev.t === 'edit') a.edits.push({ t, summary: ev.summary, by: ev.by, edit: ev.edit });
   TEND = Math.max(TEND, t);
@@ -546,20 +550,31 @@ function say(a, text) { a.bubble = { text, until: performance.now() + 3200 }; }
 let ticks = [];
 function tick(h) { ticks.unshift(h); ticks.length = Math.min(3, ticks.length); $('tick').innerHTML = ticks.map(t => `<li>${t}</li>`).join(''); }
 function tickerAt(ph) { ticks = []; const past = HL.filter(h => h.t <= ph && h.kind !== 'dead').slice(-3); if (!past.length) tick(`${ants.length} ant${ants.length === 1 ? '' : 's'} in the arena. Par is ${M.map.shortest} moves.`); for (const h of past) tick(esc(h.text)); }
+// real pace at the playhead: the last 20 moves, from the ants' own clocks (t_wall), split into LLM think time and the rest
+function pace(a) {
+  const i = a.idx, j = Math.max(0, i - 20); if (i < 1 || i - j < 2) return '';
+  const span = a.moves[i].t - a.moves[j].t, n = i - j, per = span / n;
+  const th = []; for (let k = j + 1; k <= i; k++) { const v = a.think[a.moves[k].n]; if (v != null) th.push(v); }
+  const think = th.length ? th.reduce((x, y) => x + y, 0) / th.length : null;
+  return `<small class="pace" title="Real pace over the last ${n} moves (from the ants' own clocks). Think = LLM time per turn; the rest is the game, notebook and network.">${Math.round(60 / per)}/min · ${per.toFixed(2)} s/move${think != null ? ` · think ${think.toFixed(2)}s` : ''}</small>`;
+}
 function hud() {
   $('hud').innerHTML = [...ants].sort((p, q) => (p.done || 99) - (q.done || 99) || q.visited.size - p.visited.size).map(a => {
     const w = a.moves[a.idx], d = w ? w.dist : M.dist[M.start], pct = Math.max(0, Math.min(100, 100 - d / Math.max(1, M.dist[M.start]) * 100));
-    return `<div class="hrow${a.done === 1 ? ' win' : ''}"><i style="background:${a.color}"></i><div><b>${esc(a.name)}</b><small>${a.status} · ${a.visited.size} rooms</small></div><span>${a.idx + 1}</span><div class="bar"><u style="width:${pct}%;background:${a.color}"></u></div></div>`; }).join('');
+    return `<div class="hrow${a.done === 1 ? ' win' : ''}"><i style="background:${a.color}"></i><div><b>${esc(a.name)}</b>${a.persona ? `<small class="persona">as ${esc(a.persona)}</small>` : ''}<small>${a.status} · ${a.visited.size} rooms</small>${pace(a)}</div><span>${a.idx + 1}</span><div class="bar"><u style="width:${pct}%;background:${a.color}"></u></div></div>`; }).join('');
 }
 
 // ---------- timeline controls ----------
 function seek(ph) { PH = Math.max(0, Math.min(ph, TEND)); LIVE = false; resetTo(PH); updateMode(); }
 function setPlaying(p) { PLAYING = p; $('play').textContent = p ? 'Pause' : 'Play'; }
 function updateMode() { const canLive = MATCH && MATCH.live; $('golive').disabled = !canLive || LIVE;
+  // live races move at the ants' own pace: the speed button is not an option there, and Pause freezes into replay
+  $('speed').disabled = LIVE; $('speed').textContent = LIVE ? 'Real time' : SPEED + '×';
+  $('speed').title = LIVE ? 'Live races play at the ants\' own pace. Scrub back or pause to replay faster; it rejoins live when it catches up.' : 'Replay speed';
   $('badge').textContent = LIVE ? 'live' : MATCH && MATCH.saved ? 'saved match' : 'replay'; $('badge').className = 'badge ' + (LIVE ? 'live' : 'replay'); }
-$('play').onclick = () => { if (!PLAYING && !LIVE && PH >= TEND - .05) seek(0); setPlaying(!PLAYING); };
-$('speed').onclick = () => { SPEED = { 1: 2, 2: 4, 4: 8, 8: 16, 16: 1 }[SPEED]; $('speed').textContent = SPEED + '×'; if (LIVE && SPEED !== 1) { LIVE = false; updateMode(); } };
-$('golive').onclick = () => { LIVE = true; SPEED = 1; $('speed').textContent = '1×'; resetTo(Math.max(0, Date.now() / 1000 - T0)); setPlaying(true); updateMode(); };
+$('play').onclick = () => { if (LIVE) { LIVE = false; setPlaying(false); updateMode(); return; } if (!PLAYING && !LIVE && PH >= TEND - .05) seek(0); setPlaying(!PLAYING); };
+$('speed').onclick = () => { if (LIVE) return; SPEED = { 1: 2, 2: 4, 4: 8, 8: 16, 16: 1 }[SPEED]; updateMode(); };
+$('golive').onclick = () => { LIVE = true; SPEED = 1; resetTo(Math.max(0, Date.now() / 1000 - T0)); setPlaying(true); updateMode(); };
 let scrubbing = false;
 $('scrub').addEventListener('input', () => { scrubbing = true; seek(+$('scrub').value / 1000 * TEND); });
 $('scrub').addEventListener('change', () => { scrubbing = false; });
@@ -702,7 +717,7 @@ function ensureOverlays() {
     const p = document.createElement('div'); p.className = 'pip'; p.hidden = !PIP; stage.appendChild(p); pipBoxes.push(p); pipCams.push(new THREE.PerspectiveCamera(55, 4 / 3, .05, 600)); }
   labels.forEach((d, k) => { const a = ants[k]; d.hidden = !a; if (a) { d.style.color = a.color; d.textContent = a.name; bubbles[k].style.borderColor = a.color; pipBoxes[k].style.borderColor = a.color; pipBoxes[k].innerHTML = `<b style="color:${a.color}">${esc(a.name)} cam</b>`; } else { bubbles[k].hidden = true; pipBoxes[k].hidden = true; } });
 }
-let last = 0, frames = [];
+let last = 0, frames = [], rateAvg = 1;
 function frame(now) {
   requestAnimationFrame(frame);
   const raw = now - (last || now), dt = Math.min(50, raw); last = now; frames.push(raw); if (frames.length > 60) frames.shift();
@@ -710,10 +725,15 @@ function frame(now) {
   ensureOverlays();
   const prev = PH;
   if (LIVE) PH = Math.max(PH, Date.now() / 1000 - T0 - .2);
-  else if (PLAYING && !scrubbing) { PH = Math.min(TEND + MOVE, PH + dt / 1000 * SPEED); if (PH >= TEND + MOVE && !(MATCH && MATCH.live)) setPlaying(false); }
+  else if (PLAYING && !scrubbing) { PH = Math.min(TEND + MOVE, PH + Math.min(1000, raw) / 1000 * SPEED); // raw, not dt: slow frames must not slow the replay
+    if (MATCH && MATCH.live && PH >= TEND) { LIVE = true; SPEED = 1; updateMode(); }
+    else if (PH >= TEND + MOVE && !(MATCH && MATCH.live)) setPlaying(false); }
   if (PH < prev) resetTo(PH); else if (PH > prev) advance(prev);
   if (!scrubbing) $('scrub').value = Math.round(Math.min(1, PH / Math.max(.001, TEND)) * 1000);
-  $('time').textContent = `${fmt(PH)} / ${fmt(TEND)}`;
+  // the replay speed actually achieved (it falls short when it reaches the end of what has been recorded)
+  rateAvg = rateAvg * .9 + (raw > 0 ? (PH - prev) / (raw / 1000) : 0) * .1;
+  const showRate = !LIVE && PLAYING && SPEED > 1 && rateAvg < SPEED * .9;
+  $('time').textContent = `${fmt(PH)} / ${fmt(TEND)}${showRate ? ` · actual ${rateAvg.toFixed(1)}×` : ''}`;
   // ants
   for (const a of ants) { const g = a.mesh, ud = g.userData, p = antPos(a), dx = p[0] - g.position.x, dz = p[1] - g.position.z, mv = Math.hypot(dx, dz);
     if (mv > 1e-4 && !a.done) { const want = Math.atan2(-dz, dx); let d = want - g.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); g.rotation.y += d * Math.min(1, dt / 90); }
