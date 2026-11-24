@@ -62,7 +62,7 @@ def last_text(last):
 
 
 def view(room, doors, untried, came, open_, last, walls="wood", marks=(), here=(), heard=(),
-         write=None, tell=None):
+         write=None, tell=None, hints=None):
     """(screen text, options): options maps an answer key ('1'.., 'W', 'S', 'map') to the action."""
     notes = read_notes(marks, doors)
     lines = [f"Room: {room}", f"Walls: {walls.replace('_', ' ')}"]
@@ -78,6 +78,8 @@ def view(room, doors, untried, came, open_, last, walls="wood", marks=(), here=(
             tag = "done"
         if d == came:
             tag += ", you first came from here"
+        if hints and d in hints:
+            tag += ", " + hints[d]          # worked out from its own notebook: the way back, the route out
         said = notes.get(d, set())
         if "out" in said:
             tag += ", a note here says the Way Out is this way"
