@@ -56,7 +56,7 @@ class Game:
         if self.options is None:
             self.messages()
         want, _ = self.g.teach()
-        act = V.parse(reply, self.options)
+        act = (V.parse_command if self.g.teacher == "fair" else V.parse)(reply, self.options)
         if act is None:
             self.noparse += 1
         elif act == self.options.get(want):
@@ -130,7 +130,7 @@ def main(argv=None):
     ap.add_argument("--shapes", choices=["2d", "mix"], default="2d", help="maze shapes when --size is not given")
     ap.add_argument("--walls", choices=sorted(WALLS), help="all games with these walls (default: the lesson mix)")
     ap.add_argument("--briefing", choices=["team", "size", "none"], default="team")
-    ap.add_argument("--teacher", choices=["strict", "strictC", "strictR", "human", "tagged"], default="tagged")
+    ap.add_argument("--teacher", choices=["strict", "strictC", "strictR", "human", "fair", "tagged"], default="tagged")
     a = ap.parse_args(argv)
     games = [Game(s, a.quiet, a.briefing, a.teacher, a.memory, not a.no_notebook, a.note_rate) for s in heldout(a.games, a.size, a.walls, a.shapes)]
     t0 = time.time()

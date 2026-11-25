@@ -142,3 +142,18 @@ def parse(reply, options):
                 return options[m.group(1)]
             return None
     return None
+
+
+def parse_command(reply, options):
+    """Fair format: the reply's GO: line is what a person would type (a door's name, "write on wall ...",
+    "write ...", "look"). A door may be given by a unique start of its name, as house.py allows."""
+    for line in reply.splitlines():
+        if "GO:" in line:
+            v = line.split("GO:", 1)[1].strip().strip("*`'\". ")
+            low = v.lower()
+            for k, act in options.items():
+                if k.lower() == low:
+                    return act
+            doors = [k for k, act in options.items() if act[0] == "go" and k.lower().startswith(low)] if low else []
+            return options[doors[0]] if len(doors) == 1 else None
+    return None

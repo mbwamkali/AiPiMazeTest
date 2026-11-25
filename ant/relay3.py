@@ -25,11 +25,19 @@ Teacher (the lesson bot): RelayGame.teach() gives the key it would answer, and a
 import random
 from collections import deque
 
+import os
+import sys
+
+from arena.notebook import Notebook
 from arena.pen import LOST, PAPER, Pen, assign_surfaces
 from . import personas as P
 from . import view3 as V
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runner"))
+import house as H   # noqa: E402  the shared screen a person sees (runner/house.py)
+
 READABLE = 0.25
+NB = Notebook()                      # only for its line wrapping (60 characters), so notes look as on the keeper
 GOOD_WALLS = ("wood", "plaster")   # the strict teacher only writes trail notes on these (learned from outcomes)
 
 
@@ -71,6 +79,7 @@ class Player:
         self.note_rng = random.Random(f"notes:{seed}:{i}")
         self.recent = [self.pos]  # the rooms it walked through lately, oldest first, ending here
         self.full_moves = False   # human mode writes "MOVE: A -> B" so a room's notes show both ends
+        self.fair_notes = False   # fair mode: the notebook writes house.py's auto-note line after each move
         self._note(self.pos, None)
 
     def _paper(self, text):
@@ -80,17 +89,25 @@ class Player:
             return False                       # didn't bother to write this one
         line, _ = self.pen.render(text, PAPER, self.seed)
         ok = readable(line, text)
-        if ok:
-            self.lines.append(text)          # what its notebook holds (for the human-equal lookup)
+        if ok:                               # what its notebook holds, wrapped like the keeper's notebook does
+            self.lines.extend(NB._wrap(text) if self.fair_notes else [text])
         return ok
 
     def _note(self, room, frm):
         m = self.m
+        if self.fair_notes:              # house.py --auto-notes: "A -> B"
+            ok_move = self._paper(f"{m.names[frm]} -> {m.names[room]}") if frm is not None else True
+            if room not in self.doors and ok_move:
+                self.doors[room] = list(m.adj[room])
+            return self._note_known(room, frm, ok_move)
         ok_move = frm is None or self._paper(f"MOVE: {m.names[frm]} -> {m.names[room]}" if self.full_moves
                                              else f"> {m.names[room]}")
         if room not in self.doors and self._paper(
                 f"ROOM: {m.names[room]} | doors: " + "; ".join(m.names[x] for x in m.adj[room])):
             self.doors[room] = list(m.adj[room])
+        self._note_known(room, frm, ok_move)
+
+    def _note_known(self, room, frm, ok_move):
         if ok_move:                        # what its notebook now holds (long term)
             if frm is not None:
                 self.nb_tried |= {(frm, room), (room, frm)}
@@ -172,9 +189,10 @@ class RelayGame:
         #   Way Out along that same chain with a note in every room, and walk out by following "out" notes.
         # tagged: the code tags the door toward the nearest untried room / along the known route (v3b-style).
         self.teacher = teacher
-        if teacher == "human":
+        if teacher in ("human", "fair"):
             for p in self.players:
                 p.full_moves = True
+                p.fair_notes = teacher == "fair"
                 p.memory, p.notebook, p.note_rate = memory, notebook, note_rate
                 if not notebook:
                     p.nb_tried, p.nb_visited, p.nb_came, p.doors, p.lines = set(), set(), {}, {}, []
@@ -182,9 +200,12 @@ class RelayGame:
         n = len(self.players)
         for i, p in enumerate(self.players):
             p.after, p.team_size = None, None
-            if briefing == "team" and p._paper(f"TEAM: {n - i - 1} ants come in after me"):
+            tag = "ME:" if teacher == "fair" else "TEAM:"
+            if teacher == "fair":
+                p.lines = []                          # the fair notebook starts empty, then the briefing
+            if briefing == "team" and p._paper(f"{tag} {n - i - 1} ants come in after me"):
                 p.after = n - i - 1
-            elif briefing == "size" and p._paper(f"TEAM: I am one of {n} ants"):
+            elif briefing == "size" and p._paper(f"{tag} I am one of {n} ants"):
                 p.team_size = n
 
     @property
@@ -239,8 +260,36 @@ class RelayGame:
         lines.append(V.last_text(a.last))
         return "\n".join(lines), options
 
+    def screen_fair(self):
+        """Exactly what house.py shows a person with --notebook --memory N --notes-here --auto-notes, and the
+        commands a person would type. Options map the typed command to the action."""
+        a, m = self.cur, self.m
+        cur, names = a.pos, m.names
+        doors = sorted((names[x] for x in m.adj[cur]), key=lambda d: (d.lower(), d))
+        view = {"room": names[cur], "doors": doors, "walls": self.surfaces[cur], "marks": self.marks.get(cur, [])}
+        recent = [names[x] for x in a.recent[:-1]] if a.memory else ()
+        pages = [" 1| " + l for l in a.lines]
+        notes = H.notes_about(pages, names[cur]) if a.notebook else None
+        me = H.notes_about_me(pages) if a.notebook else ()
+        text = H.screen(view, recent, notes, me).rstrip("> ").rstrip()
+        options = {"look": ("map",)}
+        for d in doors:
+            options[d] = ("go", d)
+        if a.trailing and a.route and cur in a.route:
+            k = a.route.index(cur)
+            note = f"out {names[a.route[k + 1]]}"
+            if (len(m.adj[cur]) >= 3 or cur == m.start) and note not in self.marks.get(cur, []) and cur not in a.wrote:
+                options[f"write on wall {note}"] = ("write", note)
+        if a.notebook and m.goal in m.adj[cur] and not a.marked and not a.trailing and (a.team_size or a.after):
+            route = a.chain()
+            if route:
+                options["write ROUTE: " + " > ".join(names[x] for x in route + [m.goal])] = ("mark",)
+        return text, options
+
     def screen(self):
-        if self.teacher == "human":
+        if self.teacher == "fair":
+            return self.screen_fair()
+        if self.teacher in ("human", "fair"):
             return self.screen_human()
         a, m = self.cur, self.m
         cur = a.pos
@@ -318,7 +367,17 @@ class RelayGame:
         text, options = self.screen()
         by_door = {v[1]: k for k, v in options.items() if v[0] == "go"}
         names, cur = m.names, a.pos
-        if self.teacher.startswith("strict") or self.teacher == "human":
+        if self.teacher == "fair":
+            for k, v in list(options.items()):
+                if v[0] == "write":
+                    options.setdefault("W", v)
+                elif v[0] == "mark":
+                    options.setdefault("B", v)
+            key, kind = self.teach_strict(text, options, by_door)
+            if key in ("W", "B"):
+                key = next(k for k, v in options.items() if v == options[key] and k not in ("W", "B"))
+            return key, kind
+        if self.teacher.startswith("strict") or self.teacher in ("human", "fair"):
             return self.teach_strict(text, options, by_door)
         if "B" in options:
             back = len(a.path(m.start) or [cur]) - 1
@@ -363,7 +422,7 @@ class RelayGame:
     def teach_strict(self, text, options, by_door):
         a, m = self.cur, self.m
         names, cur = m.names, a.pos
-        if "B" in options and self.teacher == "human":
+        if "B" in options and self.teacher in ("human", "fair"):
             followers = (a.team_size - 1) / 2 if a.team_size else (a.after or 0)
             if followers * a.moves > 3 * len(a.chain() or [0]) + 2:
                 return "B", "mark"
@@ -382,7 +441,7 @@ class RelayGame:
                 return by_door[names[a.came[cur]]], "back_trail"
         if names[m.goal] in by_door:
             return by_door[names[m.goal]], "goal"
-        if self.teacher == "human" and a.route_note and not a.trailing and cur in a.route_note:
+        if self.teacher in ("human", "fair") and a.route_note and not a.trailing and cur in a.route_note:
             k = a.route_note.index(cur)
             if k + 1 < len(a.route_note) - 1:
                 return by_door[names[a.route_note[k + 1]]], "route"
@@ -397,10 +456,10 @@ class RelayGame:
             ahead = [x for x in m.adj[cur] if x != a.prev]
             if ahead:
                 return by_door[names[ahead[0]]], "follow_on"     # "Last action: followed the trail here"
-        if self.teacher == "human" and a.loop_back and a.prev is not None and a.prev in m.adj[cur]:
+        if self.teacher in ("human", "fair") and a.loop_back and a.prev is not None and a.prev in m.adj[cur]:
             a_prev = a.prev                         # Tremaux: a new door led somewhere I'd been, so turn back
             return by_door[names[a_prev]], "back_loop"
-        if self.teacher == "human":                 # only this room's notes: an untried door may lead somewhere known
+        if self.teacher in ("human", "fair"):                 # only this room's notes: an untried door may lead somewhere known
             fresh = [x for x in m.adj[cur] if (cur, x) not in a.tried]
         else:
             fresh = a.fresh(cur)
@@ -425,9 +484,9 @@ class RelayGame:
             a.last = ("map",)
             return
         if action[0] == "mark":
-            c = a.chain() if self.teacher.startswith("strict") or self.teacher == "human" else None
+            c = a.chain() if self.teacher.startswith("strict") or self.teacher in ("human", "fair") else None
             a.route = (c if c else (a.path(m.start) or [a.pos])[::-1]) + [m.goal]
-            if self.teacher in ("strictR", "human") and a._paper("ROUTE: " + " > ".join(m.names[x] for x in a.route)):
+            if self.teacher in ("strictR", "human", "fair") and a._paper("ROUTE: " + " > ".join(m.names[x] for x in a.route)):
                 a.route_note = list(a.route)
             a.trailing = True
             a.last = ("mark",)
@@ -442,7 +501,7 @@ class RelayGame:
             if line:
                 self.marks.setdefault(a.pos, []).append(line)
             if (not readable(line, text) or LOST in line) and \
-                    a._paper(f"WALLS: {surf.replace('_', ' ')} walls did not take my note"):
+                    a._paper(("ME: " if self.teacher == "fair" else "WALLS: ") + f"{surf.replace('_', ' ')} walls did not take my note"):
                 a.bad.add(surf)                      # remembered only if that notebook line came out
             a.last = ("wrote", line)
             return

@@ -15,7 +15,8 @@ standing in the room with you.
 
 Helpers anyone can switch on (a person and an ant get exactly the same ones):
   --memory N     show the last N rooms you walked through ("You remember: ..."), like a short memory
-  --notes-here   with --notebook: on each screen, show the lines of your notebook that name this room
+  --notes-here   with --notebook: on each screen, show the lines of your notebook that name this room,
+                 and any lines you started with "ME:" (notes about yourself)
   --auto-notes   with --notebook: a line is written in your notebook for you after every move, with your pen
 """
 import http.client
@@ -133,7 +134,7 @@ class House:
         return self._call("POST", "/v1/wall", {"text": text})
 
 
-def screen(view, recent=(), notes=None):
+def screen(view, recent=(), notes=None, me=()):
     """The room as you see it: the same text for a person and for an ant.
     recent: rooms walked through before this one, oldest first (the --memory helper).
     notes:  None, or the notebook lines that name this room (the --notes-here helper)."""
@@ -153,10 +154,23 @@ def screen(view, recent=(), notes=None):
         o.append("\n" + m)
     if recent:
         o.append("\nYou remember: " + ", ".join(recent) + ", then here.")
+    if me:
+        o.append("\nYour notes about yourself:" + "".join("\n  " + n for n in me))
     if notes is not None:
         o.append("\nYour notes about this room:" + ("".join("\n  " + n for n in notes) if notes else " none."))
     o.append("\n> ")
     return "".join(o)
+
+
+def notes_about_me(pages, limit=4):
+    """The lines on these notebook pages that start with "ME:" (what you noted about yourself)."""
+    out = []
+    for page in pages:
+        for ln in page.splitlines():
+            m = re.match(r"^\s*\d+\| (.*)$", ln)
+            if m and lower(m.group(1)).startswith("me:"):
+                out.append(m.group(1).strip())
+    return out[-limit:]
 
 
 def notes_about(pages, room, limit=8):
@@ -193,13 +207,15 @@ class Game:
 
     def _notes(self):
         if not self.notes_here:
-            return None
+            return None, ()
         m = re.search(r"page (\d+) of", self.house.read())
         last = int(m.group(1)) if m else 1
-        return notes_about(self.house.read_pages(1, max(1, last)), self.cur)
+        pages = self.house.read_pages(1, max(1, last))
+        return notes_about(pages, self.cur), notes_about_me(pages)
 
     def show(self):
-        text = screen(self.view, self.recent[-self.memory:] if self.memory else (), self._notes())
+        notes, me = self._notes()
+        text = screen(self.view, self.recent[-self.memory:] if self.memory else (), notes, me)
         self.view["messages"] = []
         return text
 
@@ -208,7 +224,7 @@ class Game:
         if self.memory:
             self.recent = (self.recent + [frm])[-self.memory:]
         if self.auto_notes and not view.get("ended"):
-            self.house.write(f"write {frm} -> {view['room']} | paths: " + ", ".join(view["doors"]))
+            self.house.write(f"write {frm} -> {view['room']}")
 
     def intro(self):
         o = ["You wake in a room with no memory of how you got here. Your mind is foggy: you can only\n"
