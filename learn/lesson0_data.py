@@ -4,9 +4,10 @@
 Every model we build later learns from EXAMPLES: "the ant saw this screen -> the good move was that".
 This script makes those examples. Read it top to bottom; every step is small.
 
-  1. Play games with the teacher (the fair bot). It sees exactly the screen a person sees in house.py:
-     the room, its doors, its walls, what is written on them, the last 10 rooms it remembers and its own
-     notes. At each turn we record the screen and the move the teacher chose.
+  1. Play games with the teacher (the fair bot). It sees exactly the screen a person sees in house.py
+     (--notebook --memory 10 --notes-here): the room, its doors, its walls, what is written on them, the last
+     10 rooms it remembers and the notes it wrote itself. Nothing is written for it: noting a move down is a
+     choice it makes ("write Coral Hall -> Iron Den"). At each turn we record the screen and what it typed.
   2. Turn each screen into FEATURES: small facts a model can use, read off the screen text only,
      one row per possible move ("is this door the Way Out?", "is it in my memory?" ...).
   3. Split into a TRAINING set and a TEST set by maze (never by turn: turns from one maze look alike, so
@@ -82,6 +83,8 @@ def FEATURES(screen, option):
         "wall_says_out": int(f"out {door}" in walls),                     # someone wrote "out <door>" here
         "n_doors": len(doors),
         "is_write": int(option.startswith("write")),
+        "writes_last_move": int(bool(memory) and option == f"write {memory[-1]} -> {room}"),   # note the move I just made
+        "already_noted": int(bool(memory) and f"{memory[-1]} -> {room}" in notes),            # ... already in my notes
         "is_look": int(option == "look"),
     }
 

@@ -26,6 +26,7 @@ import random
 from collections import deque
 
 import os
+import re
 import sys
 
 from arena.notebook import Notebook
@@ -79,7 +80,10 @@ class Player:
         self.note_rng = random.Random(f"notes:{seed}:{i}")
         self.recent = [self.pos]  # the rooms it walked through lately, oldest first, ending here
         self.full_moves = False   # human mode writes "MOVE: A -> B" so a room's notes show both ends
-        self.fair_notes = False   # fair mode: the notebook writes house.py's auto-note line after each move
+        self.fair_notes = False   # fair mode: notebook lines in house.py's "A -> B" form
+        self.auto_notes = True    # fair mode: False = nothing is written unless the ant writes it
+        self.pending = None       # fair, own notes: the move it could write down now (from, to)
+        self.pending_me = None    # fair, own notes: the briefing it could write down ("ME: ...")
         self._note(self.pos, None)
 
     def _paper(self, text):
@@ -95,7 +99,10 @@ class Player:
 
     def _note(self, room, frm):
         m = self.m
-        if self.fair_notes:              # house.py --auto-notes: "A -> B"
+        if self.fair_notes:              # fair: "A -> B", written by the notebook (--auto-notes) or by the ant itself
+            if frm is not None and not self.auto_notes:
+                self.pending = (frm, room)   # it may write this down (an action it chooses), or not
+                return self._note_known(room, frm, False)
             ok_move = self._paper(f"{m.names[frm]} -> {m.names[room]}") if frm is not None else True
             if room not in self.doors and ok_move:
                 self.doors[room] = list(m.adj[room])
@@ -172,7 +179,7 @@ class Player:
 
 class RelayGame:
     def __init__(self, maze, ants=1, mix=None, seed=0, pen_ink=200000, wear=None, cap_factor=8, briefing="team",
-                 teacher="tagged", memory=0, notebook=True, note_rate=1.0):
+                 teacher="tagged", memory=0, notebook=True, note_rate=1.0, auto_notes=False):
         """briefing: "team"  each ant is told once, as it comes in, how many come after it, and writes it on page 1
                      "size"  told once only the team's size ("you are one of 3"), not its place in line
                      "none"  told nothing about the team: going back to mark the way is offered at every Way Out"""
@@ -193,6 +200,7 @@ class RelayGame:
             for p in self.players:
                 p.full_moves = True
                 p.fair_notes = teacher == "fair"
+                p.auto_notes = auto_notes
                 p.memory, p.notebook, p.note_rate = memory, notebook, note_rate
                 if not notebook:
                     p.nb_tried, p.nb_visited, p.nb_came, p.doors, p.lines = set(), set(), {}, {}, []
@@ -203,6 +211,9 @@ class RelayGame:
             tag = "ME:" if teacher == "fair" else "TEAM:"
             if teacher == "fair":
                 p.lines = []                          # the fair notebook starts empty, then the briefing
+                if not auto_notes and briefing == "size":
+                    p.pending_me = f"ME: I am one of {n} ants"     # told once; it is its to write down
+                    continue
             if briefing == "team" and p._paper(f"{tag} {n - i - 1} ants come in after me"):
                 p.after = n - i - 1
             elif briefing == "size" and p._paper(f"{tag} I am one of {n} ants"):
@@ -267,6 +278,8 @@ class RelayGame:
         cur, names = a.pos, m.names
         doors = sorted((names[x] for x in m.adj[cur]), key=lambda d: (d.lower(), d))
         view = {"room": names[cur], "doors": doors, "walls": self.surfaces[cur], "marks": self.marks.get(cur, [])}
+        if a.pending_me:                              # told once, as it comes in
+            view["messages"] = ["You are told: " + a.pending_me[4:].replace("I am", "you are") + "."]
         recent = [names[x] for x in a.recent[:-1]] if a.memory else ()
         pages = [" 1| " + l for l in a.lines]
         notes = H.notes_about(pages, names[cur]) if a.notebook else None
@@ -275,6 +288,12 @@ class RelayGame:
         options = {"look": ("map",)}
         for d in doors:
             options[d] = ("go", d)
+        if a.pending_me:
+            options[f"write {a.pending_me}"] = ("note", a.pending_me)
+        if a.pending and a.pending[1] == cur:
+            line = f"{names[a.pending[0]]} -> {names[cur]}"
+            if line not in a.lines:
+                options[f"write {line}"] = ("note", line)
         if a.trailing and a.route and cur in a.route:
             k = a.route.index(cur)
             note = f"out {names[a.route[k + 1]]}"
@@ -368,6 +387,12 @@ class RelayGame:
         by_door = {v[1]: k for k, v in options.items() if v[0] == "go"}
         names, cur = m.names, a.pos
         if self.teacher == "fair":
+            for k, v in options.items():            # write the briefing, then this move, before going on
+                if v[0] == "note" and v[1].startswith("ME:"):
+                    return k, "note"
+            for k, v in options.items():
+                if v[0] == "note":
+                    return k, "note"
             for k, v in list(options.items()):
                 if v[0] == "write":
                     options.setdefault("W", v)
@@ -490,6 +515,20 @@ class RelayGame:
                 a.route_note = list(a.route)
             a.trailing = True
             a.last = ("mark",)
+            return
+        if action[0] == "note":                       # writing in its own notebook: no move, its choice
+            text = action[1]
+            ok = a._paper(text)
+            if text.startswith("ME:"):
+                a.pending_me = None
+                if ok:
+                    a.team_size = int(re.search(r"one of (\d+)", text).group(1))
+            elif a.pending:
+                frm, to = a.pending
+                a.pending = None
+                if ok and to not in a.doors:
+                    a.doors[to] = list(m.adj[to])
+                a._note_known(to, frm, ok)
             return
         if action[0] == "write":
             text = action[1]

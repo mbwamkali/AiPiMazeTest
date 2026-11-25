@@ -29,8 +29,10 @@ python3 learn/lesson0_data.py --mazes 50 --show 2
 
 **What it does.**
 
-1. **Plays games.** The teacher plays relays of 1 to 3 ants on 2D mazes. At every turn we save the screen,
-   the commands it was allowed to type (door names, `look`, sometimes `write on wall ...`) and what it typed.
+1. **Plays games.** The teacher plays relays of 1 to 3 ants on 2D mazes, with the agreed setup: its notebook
+   holds only what it writes, its notes about a room are shown when it walks in, and it remembers the last 10
+   rooms. At every turn we save the screen, the commands it was allowed to type (door names, `look`,
+   `write <note>`, sometimes `write on wall ...`) and what it typed. About half its turns are writing notes.
 2. **Makes features.** A model can't read a screen the way you do, so we turn each possible move into a few
    numbers read off the text: is this door the Way Out? Is it the room I was just in? Is it in my memory,
    and how long ago? Do my notes say I already went that way? Did someone write "out <door>" on the wall?

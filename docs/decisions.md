@@ -3,6 +3,15 @@
 Decisions Jared made, newest first. Each says what was decided and why, so later work can be checked
 against it. (Design discussion lives in the project thread; this file is the short record.)
 
+## 2026-11-25 — Helpers for the next ant: own notes only, notes shown on entry, foggy memory
+
+- The notebook holds only what the player writes: no moves logged automatically (`--auto-notes` off).
+  Writing notes is the player's choice and skill, for an ant as for a person.
+- On entering a room, the player is shown its own notebook lines that name that room (`--notes-here`), and
+  any lines it started with "ME:".
+- Foggy memory: the last 10 rooms (`--memory 10`).
+- So the fair setup is `house.py --notebook --memory 10 --notes-here`, the same for a person and an ant.
+
 ## 2026-11-25 — The ant's memory is foggy: about 10 rooms
 
 - An ant remembers only the last **10 rooms** it walked through, the way the house's intro already says:
