@@ -850,3 +850,45 @@ class TestViewer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHouseHelpers(unittest.TestCase):
+    """The helpers in house.py (memory, notes about this room, notes kept for you) are the same for anyone."""
+
+    def setUp(self):
+        self.kp = Keeper()
+
+    def tearDown(self):
+        self.kp.close()
+
+    def play(self, tok, lines, *flags):
+        env = dict(os.environ, HOUSE_TOKEN=tok, HOUSE_SERVER=self.kp.url)
+        p = subprocess.run([sys.executable, HOUSE, *flags], input="".join(l + "\n" for l in lines).encode("latin-1"),
+                           capture_output=True, env=env, timeout=60)
+        return p.stdout.decode("latin-1")
+
+    def test_off_by_default(self):
+        rid, tok = self.kp.new_run(dims=2, size=4, seed=3)
+        _, v = self.kp.room(tok)
+        got = self.play(tok, [v["doors"][0], "look"], "--notebook")
+        self.assertNotIn("You remember", got)
+        self.assertNotIn("Your notes about this room", got)
+
+    def test_memory_notes_here_and_auto_notes(self):
+        sys.path.insert(0, os.path.join(ROOT, "runner"))
+        from house import screen, notes_about
+        rid, tok = self.kp.new_run(dims=2, size=4, seed=3)
+        _, v0 = self.kp.room(tok)
+        first = v0["doors"][0]
+        got = self.play(tok, [first, "look"], "--notebook", "--memory", "10", "--notes-here", "--auto-notes")
+        self.assertIn(f"You remember: {v0['room']}, then here.", got)
+        self.assertIn(f"{v0['room']} -> {first} | paths:", got)          # written for you, shown in this room
+        self.assertIn("Your notes about this room:", got)
+        # the same function draws the screen for anyone
+        v = {"room": "Coral Hall", "doors": ["Iron Den", "Way Out"], "walls": "damp_stone", "marks": ["out Way Out"]}
+        s = screen(v, ["Jade Foyer", "Iron Den"], ["Iron Den -> Coral Hall | paths: Iron Den, Way Out"])
+        self.assertIn("The walls are damp stone.", s)
+        self.assertIn("You remember: Jade Foyer, Iron Den, then here.", s)
+        self.assertIn("Your notes about this room:\n  Iron Den -> Coral Hall", s)
+        pages = [" 1| Coral Hall -> Iron Den | paths: x\n 2| Coral Halls are big\n 3| went to coral hall"]
+        self.assertEqual(notes_about(pages, "Coral Hall"), ["Coral Hall -> Iron Den | paths: x", "went to coral hall"])
