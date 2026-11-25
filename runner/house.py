@@ -17,6 +17,7 @@ Helpers anyone can switch on (a person and an ant get exactly the same ones):
   --memory N     show the last N rooms you walked through ("You remember: ..."), like a short memory
   --notes-here   with --notebook: on each screen, show the lines of your notebook that name this room,
                  and any lines you started with "ME:" (notes about yourself)
+  --moves        show how many moves you have made so far ("Moves so far: 12")
   --auto-notes   with --notebook: a line is written in your notebook for you after every move, with your pen
 """
 import http.client
@@ -134,7 +135,7 @@ class House:
         return self._call("POST", "/v1/wall", {"text": text})
 
 
-def screen(view, recent=(), notes=None, me=()):
+def screen(view, recent=(), notes=None, me=(), moves=None):
     """The room as you see it: the same text for a person and for an ant.
     recent: rooms walked through before this one, oldest first (the --memory helper).
     notes:  None, or the notebook lines that name this room (the --notes-here helper)."""
@@ -152,6 +153,8 @@ def screen(view, recent=(), notes=None, me=()):
             o.append("\n  " + m)
     for m in view.get("messages") or []:
         o.append("\n" + m)
+    if moves is not None:
+        o.append(f"\nMoves so far: {moves}")
     if recent:
         o.append("\nYou came here from " + recent[-1] + ".")
         o.append("\nYou remember: " + ", ".join(recent) + ", then here.")
@@ -187,12 +190,13 @@ def notes_about(pages, room, limit=12):
 
 
 class Game:
-    def __init__(self, house, notebook=False, memory=0, notes_here=False, auto_notes=False):
+    def __init__(self, house, notebook=False, memory=0, notes_here=False, auto_notes=False, moves=False):
         self.house = house
         self.notebook = notebook
         self.memory = max(0, int(memory))
         self.notes_here = notes_here and notebook
         self.auto_notes = auto_notes and notebook
+        self.show_moves = moves
         self.recent = []          # rooms walked through before this one (only kept for the --memory helper)
         self.view = house.room()
         self.moves = 0
@@ -216,7 +220,8 @@ class Game:
 
     def show(self):
         notes, me = self._notes()
-        text = screen(self.view, self.recent[-self.memory:] if self.memory else (), notes, me)
+        text = screen(self.view, self.recent[-self.memory:] if self.memory else (), notes, me,
+                      self.view.get("turn", self.moves) if self.show_moves else None)
         self.view["messages"] = []
         return text
 
@@ -320,7 +325,7 @@ class Game:
 
 
 SETTING_TYPES = {"server": str, "ca_cert": str, "token_file": str, "mode": str, "memory": int,
-                 "notes_here": bool, "auto_notes": bool}
+                 "notes_here": bool, "auto_notes": bool, "moves": bool}
 
 
 def read_settings(path=None):
@@ -357,6 +362,7 @@ def main(argv=None):
     ap.add_argument("--memory", type=int, default=None, help="show the last N rooms you walked through")
     ap.add_argument("--notes-here", action="store_true", default=None, help="show your notebook lines about this room")
     ap.add_argument("--auto-notes", action="store_true", default=None, help="the notebook writes a line after every move")
+    ap.add_argument("--moves", action="store_true", default=None, help="show how many moves you have made so far")
     a = ap.parse_args(argv)
     cfg = read_settings(a.config)
     server = a.server or os.environ.get("HOUSE_SERVER") or cfg.get("server") or "http://127.0.0.1:7341"
@@ -384,7 +390,8 @@ def main(argv=None):
         game = Game(House(server, token), notebook,
                     memory=a.memory if a.memory is not None else cfg.get("memory", 0),
                     notes_here=a.notes_here if a.notes_here is not None else cfg.get("notes_here", False),
-                    auto_notes=a.auto_notes if a.auto_notes is not None else cfg.get("auto_notes", False))
+                    auto_notes=a.auto_notes if a.auto_notes is not None else cfg.get("auto_notes", False),
+                    moves=a.moves if a.moves is not None else cfg.get("moves", False))
         say(game.intro())
         while not game.done:
             b = inp.readline()

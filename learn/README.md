@@ -55,3 +55,47 @@ CSV in a spreadsheet to look at it.
 
 **Try.** Make `--mazes` bigger or smaller and see how the counts change. Add a feature (say, "the door's name
 is in a note on the wall at all") and look at how often it is 1 for the teacher's move.
+
+## Lesson 1 in one page: your first model, by hand
+
+**The idea.** Give every possible move a score, `score = w · x + b`: each feature `x` times a weight `w`, added
+up, plus a bias `b`. Play the move with the highest score. Training finds weights that make the teacher's
+moves score highest. That is *logistic regression*, the simplest real model there is.
+
+**Run it** (after lesson 0 has made `learn/data/`):
+
+```bash
+python3 learn/lesson0_data.py --mazes 40
+python3 learn/lesson1_logreg.py --play 12
+```
+
+**The pieces, all in about 40 lines of NumPy:**
+
+- **Sigmoid** turns a score into a probability: `p = 1 / (1 + e^-score)`.
+- **Loss** (how wrong it is): binary cross-entropy, averaged over all rows.
+- **Gradient** (which way is downhill): for this model, `(p - y) · x` averaged. You can see it in the code.
+- **Gradient descent**: take a small step (`--lr`) against the gradient, repeat (`--epochs`). Watch the loss fall.
+
+**What a first run shows (40 training mazes, 12 test mazes):**
+
+| | On paper | Playing new mazes |
+|---|---|---|
+| Model | top move = teacher's on 94.5% of test turns | everyone out in 42% of games, 626 moves per ant |
+| Teacher | — | everyone out in 100%, 195 moves per ant |
+
+**The big lesson: 95% right per turn is not 95% good.** A game is hundreds of turns. A few wrong turns in the
+wrong places (skipping a note, walking back into a loop) compound until the ant wanders. Always judge a model
+by playing, never only by its score on paper.
+
+**Read its weights.** The model prints one weight per feature: you can see exactly what it learned. For example
+`is_look` is strongly negative (the teacher never types "look"), `is_write` strongly positive (it writes a note
+after every move). One looks wrong: `is_way_out` comes out *negative*. Why? When the Way Out is in sight the
+teacher often writes its note *first*, so in those rows the Way Out door is "not the move". A score that just
+adds features can't say "write first, then take the Way Out". That kind of *interaction* is exactly what a small
+neural network (lesson 3) can learn.
+
+**Also notice:** some features are the same for every move on a turn (`already_noted`, `n_doors`). They can't help
+choose between moves, only shift all the scores together. Good features differ between the moves.
+
+**Try.** Change `--lr` (0.05, 0.5, 5) and watch the loss: too small crawls, too big jumps around. Add a feature in
+lesson 0 (for example "this door is written in a ROUTE note here") and see whether play improves.

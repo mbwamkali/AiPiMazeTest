@@ -198,6 +198,7 @@ class RelayGame:
         #   Way Out along that same chain with a note in every room, and walk out by following "out" notes.
         # tagged: the code tags the door toward the nearest untried room / along the known route (v3b-style).
         self.teacher = teacher
+        self.mark_after = int(os.environ.get("MARK_AFTER", "500"))   # fair: (others coming) x (moves so far)
         if teacher in ("human", "fair"):
             for p in self.players:
                 p.full_moves = True
@@ -286,7 +287,7 @@ class RelayGame:
         pages = [" 1| " + l for l in a.lines]
         notes = H.notes_about(pages, names[cur]) if a.notebook else None
         me = H.notes_about_me(pages) if a.notebook else ()
-        text = H.screen(view, recent, notes, me).rstrip("> ").rstrip()
+        text = H.screen(view, recent, notes, me, a.moves).rstrip("> ").rstrip()
         options = {"look": ("map",)}
         for d in doors:
             options[d] = ("go", d)
@@ -451,7 +452,11 @@ class RelayGame:
         a, m = self.cur, self.m
         names, cur = m.names, a.pos
         if "B" in options and self.teacher == "fair":
-            return "B", "mark"                  # its own note says others are coming: mark the way (visible rule)
+            # visible rule: its own note says others are coming, and the screen shows how long it walked;
+            # worth going back to mark only if it took a while to get here
+            if ((a.team_size or 1) - 1) * a.moves >= self.mark_after:
+                return "B", "mark"
+            return by_door[names[m.goal]], "goal"
         if "B" in options and self.teacher in ("human", "fair"):
             followers = (a.team_size - 1) / 2 if a.team_size else (a.after or 0)
             if followers * a.moves > 3 * len(a.chain() or [0]) + 2:

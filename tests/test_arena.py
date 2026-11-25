@@ -890,5 +890,6 @@ class TestHouseHelpers(unittest.TestCase):
         self.assertIn("The walls are damp stone.", s)
         self.assertIn("You remember: Jade Foyer, Iron Den, then here.", s)
         self.assertIn("Your notes about this room:\n  Iron Den -> Coral Hall", s)
+        self.assertIn("Moves so far: 7", screen(v, moves=7))
         pages = [" 1| Coral Hall -> Iron Den | paths: x\n 2| Coral Halls are big\n 3| went to coral hall"]
         self.assertEqual(notes_about(pages, "Coral Hall"), ["Coral Hall -> Iron Den | paths: x", "went to coral hall"])

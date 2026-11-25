@@ -16,6 +16,8 @@ from hypermaze.core import Maze  # noqa: E402
 from ant import personas as P  # noqa: E402
 from ant.relay3 import RelayGame, GOOD_WALLS  # noqa: E402
 
+MARK_AFTER = int(os.environ.get("MARK_AFTER", "500"))
+
 
 def parse(screen):
     room = re.search(r"You are in the (.+?)\.\n", screen).group(1)
@@ -57,9 +59,13 @@ def reader(screen, options, persona, seed_key):
     for o in opts:
         if came and o == f"write {came} -> {room}":
             return o
-    for o in opts:
-        if o.startswith("write ROUTE:"):
-            return o
+    route = [o for o in opts if o.startswith("write ROUTE:")]
+    if route:                        # mark the way only if (others coming) x (moves so far) is big enough
+        mv = re.search(r"Moves so far: (\d+)", screen)
+        team = re.search(r"one of (\d+) ants", " ".join(me))
+        if mv and team and (int(team.group(1)) - 1) * int(mv.group(1)) >= MARK_AFTER:
+            return route[0]
+        return "Way Out"
     bad = " ".join(me)
     prev, nxt, just_wrote = route_steps(notes, room)
     trailing = nxt is not None and (came == nxt or (just_wrote and nxt == "Way Out"))
