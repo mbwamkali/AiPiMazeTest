@@ -104,9 +104,12 @@ def play(w, b, names, mazes, seed_base):
                 g.apply(options[move])
             r = g.result()
             out[who].append((r["all_out"], r["total_moves"] / r["ants"], r["shortest"]))
+    both = [i for i in range(mazes) if out["model"][i][0] and out["teacher"][i][0]]   # games both finished
     for who, rs in out.items():
-        print(f"  {who:8s}: everyone out in {np.mean([r[0] for r in rs]):.0%} of games, "
-              f"{np.mean([r[1] for r in rs]):.0f} moves per ant (shortest path averages {np.mean([r[2] for r in rs]):.0f})")
+        won = np.mean([r[0] for r in rs])
+        mv = np.mean([rs[i][1] for i in both]) if both else float("nan")
+        print(f"  {who:8s}: everyone out in {won:.0%} of games; in the {len(both)} games both finished: "
+              f"{mv:.0f} moves per ant (shortest path {np.mean([rs[i][2] for i in both]) if both else 0:.0f})")
 
 
 def main(argv=None):

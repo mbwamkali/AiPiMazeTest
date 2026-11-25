@@ -80,8 +80,10 @@ python3 learn/lesson1_logreg.py --play 12
 
 | | On paper | Playing new mazes |
 |---|---|---|
-| Model | top move = teacher's on 94.5% of test turns | everyone out in 42% of games, 626 moves per ant |
-| Teacher | — | everyone out in 100%, 195 moves per ant |
+| Model | top move = teacher's on 94.5% of test turns | everyone out in 42% of games |
+| Teacher | — | everyone out in 100% of games |
+
+(Moves per ant are now compared only over games both finished; an unfinished game says little about speed.)
 
 **The big lesson: 95% right per turn is not 95% good.** A game is hundreds of turns. A few wrong turns in the
 wrong places (skipping a note, walking back into a loop) compound until the ant wanders. Always judge a model
@@ -99,3 +101,43 @@ choose between moves, only shift all the scores together. Good features differ b
 
 **Try.** Change `--lr` (0.05, 0.5, 5) and watch the loss: too small crawls, too big jumps around. Add a feature in
 lesson 0 (for example "this door is written in a ROUTE note here") and see whether play improves.
+
+## Lesson 2 in one page: the same model in PyTorch
+
+**The idea.** Lesson 1 did every step by hand. PyTorch does the same work, but you write only the *score* and
+the *loss*; it works out the gradients itself (**autograd**) and an **optimiser** takes the step. Every bigger model
+from here on (and the Qwen ant) is made of exactly these pieces.
+
+**Run it** (PyTorch lives in the training Python, `~/ant-venv`):
+
+```bash
+~/ant-venv/bin/python learn/lesson2_torch.py --play 12
+~/ant-venv/bin/python learn/lesson2_torch.py --optimizer adam --batch 1024 --epochs 20
+```
+
+**Side by side** (the top of the file shows each lesson 1 line next to its PyTorch version):
+
+| Lesson 1, by hand | Lesson 2, PyTorch |
+|---|---|
+| `w = zeros; b = 0` | `model = nn.Linear(n, 1)` |
+| `p = sigmoid(X @ w + b)` | `logits = model(X)` |
+| cross-entropy written out | `nn.BCEWithLogitsLoss()` |
+| `grad = X.T @ (p - y) / n` | `loss.backward()` |
+| `w -= lr * grad` | `optimizer.step()` (and `optimizer.zero_grad()` first) |
+
+**What a run shows.** Both versions end with almost the same weights (for example `is_look` -2.74 by hand,
+-2.80 in PyTorch). They differ a little only because PyTorch starts from small random weights instead of zero.
+Same model, same answers: the library just does the bookkeeping. And it plays the same: well on paper, still far
+from the teacher in real games. Changing the *library* doesn't change what a straight-line score can express.
+
+**New words:**
+- *Tensor*: PyTorch's array. Like a NumPy array, but it can remember how it was computed (for gradients) and live
+  on a GPU.
+- *Mini-batch* (`--batch 1024`): update after every 1,024 rows instead of after all 150,000. Many more, noisier steps.
+  Usually reaches a good place in far fewer passes (epochs).
+- *Adam* (`--optimizer adam`): an optimiser that adapts the step size for each weight. Often faster and less fussy
+  about the learning rate than plain SGD.
+- *Seed* (`torch.manual_seed`): fixes the random start, so a run can be repeated exactly.
+
+**Try.** Run SGD with all rows (as lesson 1) against Adam with mini-batches, 20 epochs each. Which reaches a lower
+loss? Then lesson 3 keeps everything here and changes one line, the model, to a small neural network.
