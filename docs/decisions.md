@@ -21,11 +21,8 @@ Merging to main and deploying to the keeper or the ant machines still need Jared
 - Teachers: every taught move must be explainable from the screen + memory + own notes.
 - Team relays: told only "You are one of N ants" once at start.
 
-## Folder tidy on the workstation (Jared card, 2026-11-25 13:33 CT): YES
-- After lesson 2 is pushed: ONE working folder ~/hypermaze-dev = the AiPiMazeTest repo. Move the main checkout ~/projects/aipimazetest to ~/hypermaze-dev (fix the worktree link with `git worktree repair`), push everything in the worktree ~/projects/aipimazetest-notebook, then `git worktree remove` it and check out walls-fair in ~/hypermaze-dev. Lessons then live at ~/hypermaze-dev/learn.
-- Move into ~/old-maze/ (NOT deleted): ~/hypermaze-py, ~/hypermaze-text, ~/hypermaze-sim (sim results).
-- Leave as they are: ~/hypermaze (installed app, configs, play script), ~/hypermaze-keeper-data, ~/ant-work, ~/ant-venv.
-- Before moving: check no running process, systemd unit, cron, script (incl. ~/ant-work/*.sh, hm configs, play script, firewall script paths) points at a folder being moved; fix references first. Report what moved and what referenced it.
+## Workstation folders (tidied 2026-11-25)
+- Code: ~/hypermaze-dev (repo). Archive: ~/old-maze/. Untouched: ~/hypermaze, ~/hypermaze-keeper-data, ~/ant-work, ~/ant-venv.
 
 ## Project goal
-- The point is Jared learning to build, train, constrain and run small models in Python, on Pis, in short iterations. Any model type is fair game. Learning plan: lessons 0-9, format may change. Fair screen, teacher, explainability test and lesson 0 are done (walls-fair 96ad02f). Lesson 1 done (walls-fair 7750cf3: 94.5% turn match, 42% all out). Step counter done (--moves; mark the way when others x moves >= 500). CURRENT GO (Jared card, 2026-11-25 13:30 CT): LESSON 2 = the lesson 1 model rewritten in PyTorch (tensors, autograd, optimizer, training loop), same data and same game scoring, side by side with lesson 1 so the differences are visible; CPU only; short commented file + explainer section. 
+- The point is Jared learning to build, train, constrain and run small models in Python, on Pis, in short iterations. Any model type is fair game. Learning plan: lessons 0-9, format may change. Fair screen, teacher, explainability test and lesson 0 are done (walls-fair 96ad02f). Lesson 1 done (walls-fair 7750cf3: 94.5% turn match, 42% all out). Step counter done (--moves; mark the way when others x moves >= 500). Lesson 2 done (walls-fair 44f04a9). Folder tidy done: code in ~/hypermaze-dev. NEXT STEP: waiting on Jared's card. Do not start until it is recorded here. 
