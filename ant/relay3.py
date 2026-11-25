@@ -84,6 +84,8 @@ class Player:
         self.auto_notes = True    # fair mode: False = nothing is written unless the ant writes it
         self.pending = None       # fair, own notes: the move it could write down now (from, to)
         self.pending_me = None    # fair, own notes: the briefing it could write down ("ME: ...")
+        self.route_plan = None    # fair: the route it is writing down, step by step
+        self.route_written = 0
         self._note(self.pos, None)
 
     def _paper(self, text):
@@ -265,7 +267,7 @@ class RelayGame:
                 options["W"] = ("write", note)
         if a.memory and len(a.recent) > 1:
             lines.append("You remember: " + ", ".join(names[x] for x in a.recent[:-1]) + f", then here ({names[cur]})")
-        if a.notebook and m.goal in m.adj[cur] and not a.marked and not a.trailing and (a.team_size or a.after):
+        if a.notebook and m.goal in m.adj[cur] and not a.marked and not a.trailing and ((a.team_size or 0) > 1 or a.after):
             lines.append("B - go back and mark the way")
             options["B"] = ("mark",)
         lines.append(V.last_text(a.last))
@@ -299,10 +301,11 @@ class RelayGame:
             note = f"out {names[a.route[k + 1]]}"
             if (len(m.adj[cur]) >= 3 or cur == m.start) and note not in self.marks.get(cur, []) and cur not in a.wrote:
                 options[f"write on wall {note}"] = ("write", note)
-        if a.notebook and m.goal in m.adj[cur] and not a.marked and not a.trailing and (a.team_size or a.after):
-            route = a.chain()
-            if route:
-                options["write ROUTE: " + " > ".join(names[x] for x in route + [m.goal])] = ("mark",)
+        if a.notebook and m.goal in m.adj[cur] and not a.marked and not a.trailing and ((a.team_size or 0) > 1 or a.after):
+            route = a.route_plan or ((a.chain() or []) + [m.goal] if a.chain() else None)
+            if route:                                  # the route, one short step per line: "ROUTE: A > B"
+                k = a.route_written
+                options[f"write ROUTE: {names[route[k]]} > {names[route[k + 1]]}"] = ("mark",)
         return text, options
 
     def screen(self):
@@ -447,6 +450,8 @@ class RelayGame:
     def teach_strict(self, text, options, by_door):
         a, m = self.cur, self.m
         names, cur = m.names, a.pos
+        if "B" in options and self.teacher == "fair":
+            return "B", "mark"                  # its own note says others are coming: mark the way (visible rule)
         if "B" in options and self.teacher in ("human", "fair"):
             followers = (a.team_size - 1) / 2 if a.team_size else (a.after or 0)
             if followers * a.moves > 3 * len(a.chain() or [0]) + 2:
@@ -481,6 +486,8 @@ class RelayGame:
             ahead = [x for x in m.adj[cur] if x != a.prev]
             if ahead:
                 return by_door[names[ahead[0]]], "follow_on"     # "Last action: followed the trail here"
+        if self.teacher == "fair":
+            return self.tremaux(a, by_door)
         if self.teacher in ("human", "fair") and a.loop_back and a.prev is not None and a.prev in m.adj[cur]:
             a_prev = a.prev                         # Tremaux: a new door led somewhere I'd been, so turn back
             return by_door[names[a_prev]], "back_loop"
@@ -494,12 +501,57 @@ class RelayGame:
             pick = order[-1] if pi == 0 else order[0] if pi == 1 else \
                 random.Random(f"{a.seed}:{a.moves}:{cur}").choice(order)
             return by_door[names[pick]], "new_more" if len(fresh) > 1 else "new"
+        if self.teacher == "fair" and (a.recent[:-1].count(cur) >= 2 or cur not in a.came):
+            # going round in circles (this room twice in my memory), or my notes don't say how I first got here:
+            # take the door to the room I've seen least lately (not in my memory at all if there is one)
+            recent = [names[x] for x in a.recent[:-1]]
+            ds = sorted(m.adj[cur], key=lambda x: (recent[::-1].index(names[x]) * -1 if names[x] in recent else -99,
+                                                   names[x]))
+            return by_door[names[ds[0]]], "unstick"
         if cur in a.came:
             return by_door[names[a.came[cur]]], "back"
         loop = [x for x in m.adj[cur] if (cur, x) not in a.tried]          # "untried, leads to a known room"
         if loop:
             return by_door[names[sorted(loop, key=lambda x: names[x])[0]]], "lost"
         return by_door[names[random.Random(f"{a.seed}:{a.moves}:{cur}").choice(m.adj[cur])]], "lost"
+
+    def door_uses(self, a):
+        """How often it went through each door here, as far as it can see: its notes about this room
+        ("A -> B" lines) and its memory (consecutive rooms). Taking the larger of the two for each door."""
+        m, cur = self.m, a.pos
+        names = m.names
+        notes = H.notes_about([" 1| " + l for l in a.lines], names[cur])
+        uses = {}
+        for x in m.adj[cur]:
+            n_notes = sum(1 for l in notes if l in (f"{names[cur]} -> {names[x]}", f"{names[x]} -> {names[cur]}"))
+            path = a.recent
+            n_mem = sum(1 for p, q in zip(path, path[1:]) if {p, q} == {cur, x})
+            uses[x] = max(n_notes, n_mem)
+        return uses
+
+    def tremaux(self, a, by_door):
+        """Exploring with only what this room shows (Tremaux's rule): never-used doors first; a door that just
+        led back somewhere already known, straight back; else a door used once; never one used twice if any
+        other is left. Persona decides among equals (Mooore last, Harry first, Curlee any)."""
+        m, cur = self.m, a.pos
+        names = m.names
+        uses = self.door_uses(a)
+        came = a.recent[-2] if len(a.recent) > 1 else None
+        known_here = sum(uses.values()) > (1 if came is not None else 0)
+        if came is not None and came in uses and uses[came] == 1 and known_here and a.loop_back:
+            return by_door[names[came]], "back_loop"
+        pi = P.NAMES.index(a.persona) if a.persona in P.NAMES else 0
+        for want, kind in ((0, "new"), (1, "back")):
+            ds = sorted((x for x in m.adj[cur] if uses[x] == want), key=lambda x: (names[x].lower(), names[x]))
+            if want == 1 and came in ds:
+                return by_door[names[came]], "back"
+            if ds:
+                pick = ds[-1] if pi == 0 else ds[0] if pi == 1 else \
+                    random.Random(f"{a.seed}:{a.moves}:{cur}").choice(ds)
+                return by_door[names[pick]], (kind if want else ("new_more" if len(ds) > 1 else "new"))
+        least = min(uses.values())
+        ds = sorted((x for x in m.adj[cur] if uses[x] == least), key=lambda x: (names[x].lower(), names[x]))
+        return by_door[names[ds[0]]], "unstick"
 
     # ---- doing it --------------------------------------------------------------------
     def apply(self, action):
@@ -508,6 +560,17 @@ class RelayGame:
         if action is None or action[0] == "map":
             a.last = ("map",)
             return
+        if action[0] == "mark" and self.teacher == "fair":   # one route step written per command
+            if a.route_plan is None:
+                a.route_plan = a.chain() + [m.goal]
+            k = a.route_written
+            a._paper(f"ROUTE: {m.names[a.route_plan[k]]} > {m.names[a.route_plan[k + 1]]}")
+            a.route_written += 1
+            if a.route_written >= len(a.route_plan) - 1:   # all written: now walk back marking the walls
+                a.route = list(a.route_plan)
+                a.route_note = list(a.route_plan)
+                a.trailing = True
+            return
         if action[0] == "mark":
             c = a.chain() if self.teacher.startswith("strict") or self.teacher in ("human", "fair") else None
             a.route = (c if c else (a.path(m.start) or [a.pos])[::-1]) + [m.goal]
@@ -515,6 +578,9 @@ class RelayGame:
                 a.route_note = list(a.route)
             a.trailing = True
             a.last = ("mark",)
+            return
+        if action[0] == "skip_note":                  # it didn't write the move down (lessons: a gap on purpose)
+            a.pending = None
             return
         if action[0] == "note":                       # writing in its own notebook: no move, its choice
             text = action[1]

@@ -44,14 +44,15 @@ def maze_2d(rng):
     return 2, size, rng.choice([0.0, 0.0, 0.1, 0.2, 0.25, 0.3]), rng.choice(["dfs", "dfs", "wilson", "prim"])
 
 
-def games(n, seed_base, rng, briefing="team", shapes="2d", teacher="tagged"):
+def games(n, seed_base, rng, briefing="team", shapes="2d", teacher="tagged", memory=0):
     for i in range(n):
         dims, size, loops, gen = maze_2d(rng) if shapes == "2d" else maze_mix(rng)
         maze = Maze(dims, size, loops, seed=seed_base + i, generator=gen)
         ants = rng.choice([1, 1, 2, 2, 3, 3, 3])
         mix = rng.choices([m for m, _ in MIXES], [w for _, w in MIXES])[0]
         pen = rng.choice([200000] * 6 + [20000, 5000])
-        yield RelayGame(maze, ants=ants, mix=mix, seed=seed_base + i, pen_ink=pen, briefing=briefing, teacher=teacher)
+        yield RelayGame(maze, ants=ants, mix=mix, seed=seed_base + i, pen_ink=pen, briefing=briefing, teacher=teacher,
+                        memory=memory)
 
 
 def main(argv=None):
@@ -62,6 +63,9 @@ def main(argv=None):
     ap.add_argument("--quiet-share", type=float, default=0.25)
     ap.add_argument("--wrong", type=float, default=0.04)
     ap.add_argument("--chatty", type=float, default=0.08)
+    ap.add_argument("--memory", type=int, default=0, help="fair/human teacher: rooms remembered (decided: 10)")
+    ap.add_argument("--drop-notes", type=float, default=0.0,
+                    help="fair teacher: share of its notes left unwritten (untaught), so lessons teach recovering")
     ap.add_argument("--keep", type=float, default=1.0,
                     help="keep this share of the lessons (more mazes for the same number of lessons)")
     ap.add_argument("--teacher", choices=["strict", "strictC", "strictR", "human", "fair", "tagged"], default="tagged",
@@ -75,7 +79,7 @@ def main(argv=None):
     n = talk = 0
     kinds = {}
     with open(a.out, "w") as f:
-        for g in games(a.games, a.seed_base, rng, a.briefing, a.shapes, a.teacher):
+        for g in games(a.games, a.seed_base, rng, a.briefing, a.shapes, a.teacher, a.memory):
             while not g.done:
                 text, options = g.screen()
                 doors = [v for k, v in options.items() if v[0] == "go"]
@@ -83,6 +87,9 @@ def main(argv=None):
                     g.apply(rng.choice(doors))          # an untaught wrong turn
                     continue
                 key, kind = g.teach()
+                if kind == "note" and not options[key][1].startswith("ME:") and rng.random() < a.drop_notes:
+                    g.apply(("skip_note",))             # an untaught gap in its notes; the screens after it teach recovery
+                    continue
                 persona = g.cur.persona
                 quiet = rng.random() < a.quiet_share
                 to = options[key][1] if options[key][0] in ("go", "write", "say") else ""
@@ -91,6 +98,9 @@ def main(argv=None):
                     say = comment(persona, kind, to, rng)
                 if rng.random() < a.keep:
                     msgs = V.messages(persona, text, quiet)
+                    if g.teacher == "fair":             # the fair format: the screen as house.py shows it, typed command
+                        msgs = [{"role": "system", "content": V.system_prompt(persona) + V.FAIR_PROMPT},
+                                {"role": "user", "content": text}]
                     msgs.append({"role": "assistant", "content": V.answer(key, say)})
                     f.write(json.dumps({"messages": msgs}) + "\n")
                     n += 1

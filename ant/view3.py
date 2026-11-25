@@ -108,7 +108,10 @@ def view(room, doors, untried, came, open_, last, walls="wood", marks=(), here=(
     return "\n".join(lines), options
 
 
-PROMPT_NAMES = {"NoMoe": "Mooore"}     # v3 is trained with the bossy ant's new name
+PROMPT_NAMES = {"NoMoe": "Mooore"}
+FAIR_PROMPT = (" Read the room. Answer GO: followed by exactly what you would type: a path's name, "
+               "write <note> for your notebook, write on wall <text>, or look. Now and then add one short "
+               "in-character line after it.")     # v3 is trained with the bossy ant's new name
 
 
 def system_prompt(persona):

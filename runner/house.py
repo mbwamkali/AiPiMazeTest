@@ -153,6 +153,7 @@ def screen(view, recent=(), notes=None, me=()):
     for m in view.get("messages") or []:
         o.append("\n" + m)
     if recent:
+        o.append("\nYou came here from " + recent[-1] + ".")
         o.append("\nYou remember: " + ", ".join(recent) + ", then here.")
     if me:
         o.append("\nYour notes about yourself:" + "".join("\n  " + n for n in me))
@@ -173,7 +174,7 @@ def notes_about_me(pages, limit=4):
     return out[-limit:]
 
 
-def notes_about(pages, room, limit=8):
+def notes_about(pages, room, limit=12):
     """The lines on these notebook pages that name the room (whole name, any case), most recent last."""
     pat = re.compile(r"(?<![A-Za-z])" + re.escape(lower(room)) + r"(?![A-Za-z0-9])")
     out = []

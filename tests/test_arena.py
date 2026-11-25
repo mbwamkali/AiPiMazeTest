@@ -881,7 +881,7 @@ class TestHouseHelpers(unittest.TestCase):
         _, v0 = self.kp.room(tok)
         first = v0["doors"][0]
         got = self.play(tok, [first, "look"], "--notebook", "--memory", "10", "--notes-here", "--auto-notes")
-        self.assertIn(f"You remember: {v0['room']}, then here.", got)
+        self.assertIn(f"You came here from {v0['room']}.\nYou remember: {v0['room']}, then here.", got)
         self.assertIn(f"  {v0['room']} -> {first}\n", got)               # written for you, shown in this room
         self.assertIn("Your notes about this room:", got)
         # the same function draws the screen for anyone
