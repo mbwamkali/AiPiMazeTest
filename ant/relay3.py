@@ -64,10 +64,15 @@ class Player:
         self.last = None          # for the "Last action" line
         self.rng = random.Random(self.seed)
         self.lines = []
+        self.memory = 0           # how many recent rooms it remembers without notes (human mode)
+        self.notebook = True      # human mode: False = no notebook at all
+        self.recent = [self.pos]  # the rooms it walked through lately, oldest first, ending here
         self.full_moves = False   # human mode writes "MOVE: A -> B" so a room's notes show both ends
         self._note(self.pos, None)
 
     def _paper(self, text):
+        if not self.notebook:
+            return False
         line, _ = self.pen.render(text, PAPER, self.seed)
         ok = readable(line, text)
         if ok:
@@ -88,6 +93,20 @@ class Player:
                 self.visited.add(room)
                 if frm is not None:
                     self.came[room] = frm
+
+    def remember(self, room):
+        """Short-term memory: the last `memory` rooms before this one. What it adds to what the notes hold."""
+        self.recent = (self.recent + [room])[-(self.memory + 1):] if self.memory else [room]
+        rs = self.recent
+        mem_tried = {(a, b) for a, b in zip(rs, rs[1:])} | {(b, a) for a, b in zip(rs, rs[1:])}
+        if not self.notebook:                 # memory is all it has
+            self.tried, self.visited = set(mem_tried), set(rs)
+            self.came = {}
+            for i, r in enumerate(rs[1:], 1):
+                self.came.setdefault(r, rs[i - 1])
+        else:
+            self.tried |= mem_tried
+            self.visited |= set(rs)
 
     def chain(self):
         """Rooms from the start room to here along "first came from" (its own notebook), or None."""
@@ -129,7 +148,7 @@ class Player:
 
 class RelayGame:
     def __init__(self, maze, ants=1, mix=None, seed=0, pen_ink=200000, wear=None, cap_factor=8, briefing="team",
-                 teacher="tagged"):
+                 teacher="tagged", memory=0, notebook=True):
         """briefing: "team"  each ant is told once, as it comes in, how many come after it, and writes it on page 1
                      "size"  told once only the team's size ("you are one of 3"), not its place in line
                      "none"  told nothing about the team: going back to mark the way is offered at every Way Out"""
@@ -149,6 +168,9 @@ class RelayGame:
         if teacher == "human":
             for p in self.players:
                 p.full_moves = True
+                p.memory, p.notebook = memory, notebook
+                if not notebook:
+                    p.tried, p.visited, p.came, p.doors, p.lines = set(), {p.pos}, {}, {}, []
         n = len(self.players)
         for i, p in enumerate(self.players):
             p.after, p.team_size = None, None
@@ -201,7 +223,9 @@ class RelayGame:
             if (len(m.adj[cur]) >= 3 or cur == m.start) and note not in self.marks.get(cur, []) and cur not in a.wrote:
                 lines.append(f"W - write on the wall: {note}")
                 options["W"] = ("write", note)
-        if m.goal in m.adj[cur] and not a.marked and not a.trailing and (a.team_size or a.after):
+        if a.memory and len(a.recent) > 1:
+            lines.append("You remember: " + ", ".join(names[x] for x in a.recent[:-1]) + f", then here ({names[cur]})")
+        if a.notebook and m.goal in m.adj[cur] and not a.marked and not a.trailing and (a.team_size or a.after):
             lines.append("B - go back and mark the way")
             options["B"] = ("mark",)
         lines.append(V.last_text(a.last))
@@ -435,6 +459,7 @@ class RelayGame:
             self.k += 1
             return
         a._note(to, frm)
+        a.remember(to)
         if a.trailing and (frm == m.start or (a.route and to not in a.route)):
             a.trailing, a.marked = False, True        # marked as far as the start room: now out
 
