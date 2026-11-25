@@ -49,3 +49,4 @@ pi-time.sh
 # real settings files (only the examples are committed)
 config/*.toml
 !config/*.example.toml
+learn/data/
