@@ -51,6 +51,7 @@ class Player:
         self.moves = 0
         self.writes = 0
         self.doors, self.tried, self.came, self.visited = {}, set(), {}, set()
+        self.nb_tried, self.nb_came, self.nb_visited = set(), {}, set()   # from its notebook only
         self.bad = set()          # materials it saw a note fail on (kept in its notes)
         self.route = None         # start ... Way Out, once it has been there
         self.trailing = False     # going back to mark the way
@@ -90,27 +91,29 @@ class Player:
         if room not in self.doors and self._paper(
                 f"ROOM: {m.names[room]} | doors: " + "; ".join(m.names[x] for x in m.adj[room])):
             self.doors[room] = list(m.adj[room])
-        if ok_move:
+        if ok_move:                        # what its notebook now holds (long term)
             if frm is not None:
-                self.tried |= {(frm, room), (room, frm)}
-            if room not in self.visited:
-                self.visited.add(room)
+                self.nb_tried |= {(frm, room), (room, frm)}
+            if room not in self.nb_visited:
+                self.nb_visited.add(room)
                 if frm is not None:
-                    self.came[room] = frm
+                    self.nb_came[room] = frm
+        self._merge()
 
     def remember(self, room):
-        """Short-term memory: the last `memory` rooms before this one. What it adds to what the notes hold."""
+        """Short-term memory: the last `memory` rooms before this one; older rooms are forgotten unless noted."""
         self.recent = (self.recent + [room])[-(self.memory + 1):] if self.memory else [room]
+        self._merge()
+
+    def _merge(self):
+        """What it knows right now = what its notebook holds + what it still remembers (nothing older)."""
         rs = self.recent
-        mem_tried = {(a, b) for a, b in zip(rs, rs[1:])} | {(b, a) for a, b in zip(rs, rs[1:])}
-        if not self.notebook:                 # memory is all it has
-            self.tried, self.visited = set(mem_tried), set(rs)
-            self.came = {}
-            for i, r in enumerate(rs[1:], 1):
-                self.came.setdefault(r, rs[i - 1])
-        else:
-            self.tried |= mem_tried
-            self.visited |= set(rs)
+        self.tried = set(self.nb_tried) | {(a, b) for a, b in zip(rs, rs[1:])} | {(b, a) for a, b in zip(rs, rs[1:])}
+        self.visited = set(self.nb_visited) | set(rs)
+        self.came = dict(self.nb_came)
+        for i, r in enumerate(rs[1:], 1):
+            if r not in self.came and rs[i - 1] != r:
+                self.came[r] = rs[i - 1]
 
     def chain(self):
         """Rooms from the start room to here along "first came from" (its own notebook), or None."""
@@ -174,7 +177,8 @@ class RelayGame:
                 p.full_moves = True
                 p.memory, p.notebook, p.note_rate = memory, notebook, note_rate
                 if not notebook:
-                    p.tried, p.visited, p.came, p.doors, p.lines = set(), {p.pos}, {}, {}, []
+                    p.nb_tried, p.nb_visited, p.nb_came, p.doors, p.lines = set(), set(), {}, {}, []
+                    p._merge()
         n = len(self.players)
         for i, p in enumerate(self.players):
             p.after, p.team_size = None, None
