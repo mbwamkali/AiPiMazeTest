@@ -35,10 +35,10 @@ def heldout(n, size=None, walls=None, shapes="2d"):
 
 
 class Game:
-    def __init__(self, spec, quiet, briefing="team", teacher="tagged", memory=0, notebook=True):
+    def __init__(self, spec, quiet, briefing="team", teacher="tagged", memory=0, notebook=True, note_rate=1.0):
         maze, ants, mix, seed = spec
         self.g = RelayGame(maze, ants=ants, mix=mix, seed=seed, briefing=briefing, teacher=teacher,
-                           memory=memory, notebook=notebook)
+                           memory=memory, notebook=notebook, note_rate=note_rate)
         self.quiet = quiet
         self.noparse = self.steps = self.agree = 0
         self.options = None
@@ -125,13 +125,14 @@ def main(argv=None):
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--json")
     ap.add_argument("--memory", type=int, default=0, help="human teacher: rooms remembered without notes")
+    ap.add_argument("--note-rate", type=float, default=1.0, help="human teacher: share of notes it writes")
     ap.add_argument("--no-notebook", action="store_true", help="human teacher: no notebook at all")
     ap.add_argument("--shapes", choices=["2d", "mix"], default="2d", help="maze shapes when --size is not given")
     ap.add_argument("--walls", choices=sorted(WALLS), help="all games with these walls (default: the lesson mix)")
     ap.add_argument("--briefing", choices=["team", "size", "none"], default="team")
     ap.add_argument("--teacher", choices=["strict", "strictC", "strictR", "human", "tagged"], default="tagged")
     a = ap.parse_args(argv)
-    games = [Game(s, a.quiet, a.briefing, a.teacher, a.memory, not a.no_notebook) for s in heldout(a.games, a.size, a.walls, a.shapes)]
+    games = [Game(s, a.quiet, a.briefing, a.teacher, a.memory, not a.no_notebook, a.note_rate) for s in heldout(a.games, a.size, a.walls, a.shapes)]
     t0 = time.time()
     if a.backend == "hf":
         run_hf(games, a.model, a.batch, a.max_new, a.temperature)

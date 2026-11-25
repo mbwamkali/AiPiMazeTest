@@ -66,6 +66,8 @@ class Player:
         self.lines = []
         self.memory = 0           # how many recent rooms it remembers without notes (human mode)
         self.notebook = True      # human mode: False = no notebook at all
+        self.note_rate = 1.0      # share of notes it actually writes (a sloppy note-keeper writes fewer)
+        self.note_rng = random.Random(f"notes:{seed}:{i}")
         self.recent = [self.pos]  # the rooms it walked through lately, oldest first, ending here
         self.full_moves = False   # human mode writes "MOVE: A -> B" so a room's notes show both ends
         self._note(self.pos, None)
@@ -73,6 +75,8 @@ class Player:
     def _paper(self, text):
         if not self.notebook:
             return False
+        if self.note_rate < 1.0 and self.note_rng.random() >= self.note_rate:
+            return False                       # didn't bother to write this one
         line, _ = self.pen.render(text, PAPER, self.seed)
         ok = readable(line, text)
         if ok:
@@ -148,7 +152,7 @@ class Player:
 
 class RelayGame:
     def __init__(self, maze, ants=1, mix=None, seed=0, pen_ink=200000, wear=None, cap_factor=8, briefing="team",
-                 teacher="tagged", memory=0, notebook=True):
+                 teacher="tagged", memory=0, notebook=True, note_rate=1.0):
         """briefing: "team"  each ant is told once, as it comes in, how many come after it, and writes it on page 1
                      "size"  told once only the team's size ("you are one of 3"), not its place in line
                      "none"  told nothing about the team: going back to mark the way is offered at every Way Out"""
@@ -168,7 +172,7 @@ class RelayGame:
         if teacher == "human":
             for p in self.players:
                 p.full_moves = True
-                p.memory, p.notebook = memory, notebook
+                p.memory, p.notebook, p.note_rate = memory, notebook, note_rate
                 if not notebook:
                     p.tried, p.visited, p.came, p.doors, p.lines = set(), {p.pos}, {}, {}, []
         n = len(self.players)
