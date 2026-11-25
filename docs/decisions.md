@@ -21,4 +21,4 @@ Merging to main and deploying to the keeper or the ant machines still need Jared
 - Team relays: told only "You are one of N ants" once at start.
 
 ## Project goal
-- The point is Jared learning to build, train, constrain and run small models in Python, on Pis, in short iterations. Any model type is fair game. Learning plan: lessons 0-9, format may change. Current go: fair screen + teacher bot + explainability test + lesson 0 (games -> training data).
+- The point is Jared learning to build, train, constrain and run small models in Python, on Pis, in short iterations. Any model type is fair game. Learning plan: lessons 0-9, format may change. Fair screen, teacher, explainability test and lesson 0 are done (walls-fair 96ad02f). CURRENT GO (Jared card, 2026-11-25 11:51 CT): write LESSON 1 now: first model by hand in NumPy (logistic regression on lesson 0 data), scored by games won against the fair teacher on held-out mazes; CPU only; one short commented file + one-page explainer in learn/. Step counter card still open: until answered, keep the screen as is.
