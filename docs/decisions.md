@@ -21,5 +21,11 @@ Merging to main and deploying to the keeper or the ant machines still need Jared
 - Teachers: every taught move must be explainable from the screen + memory + own notes.
 - Team relays: told only "You are one of N ants" once at start.
 
+## Folder tidy on the workstation (Jared card, 2026-11-25 13:33 CT): YES
+- After lesson 2 is pushed: make ONE working folder ~/hypermaze-dev holding the repo (move ~/projects/aipimazetest-notebook there, all branches kept).
+- Move stale copies into ~/old-maze/ (NOT deleted): ~/projects/aipimazetest, ~/hypermaze-py, ~/hypermaze-text.
+- Leave ~/hypermaze (installed app, configs, play script) and ~/ant-work as they are.
+- Before moving: check no running process, systemd unit, cron, script (incl. ~/ant-work/*.sh, hm configs, play script) points at a folder being moved; fix references first. List what moved and anything that referenced it.
+
 ## Project goal
 - The point is Jared learning to build, train, constrain and run small models in Python, on Pis, in short iterations. Any model type is fair game. Learning plan: lessons 0-9, format may change. Fair screen, teacher, explainability test and lesson 0 are done (walls-fair 96ad02f). Lesson 1 done (walls-fair 7750cf3: 94.5% turn match, 42% all out). Step counter done (--moves; mark the way when others x moves >= 500). CURRENT GO (Jared card, 2026-11-25 13:30 CT): LESSON 2 = the lesson 1 model rewritten in PyTorch (tensors, autograd, optimizer, training loop), same data and same game scoring, side by side with lesson 1 so the differences are visible; CPU only; short commented file + explainer section. 
