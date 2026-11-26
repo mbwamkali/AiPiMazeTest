@@ -8,8 +8,8 @@ takes the step. Every bigger model (lessons 3-7, and the Qwen ant) is built from
 Same data, same model, same game scoring as lesson 1, so you can compare side by side.
 
 Run it with the training Python (it has PyTorch):
-    ~/ant-venv/bin/python learn/lesson2_torch.py --play 12
-    ~/ant-venv/bin/python learn/lesson2_torch.py --optimizer adam --batch 1024     # mini-batches and Adam
+    ../venv/bin/python learn/lesson2_torch.py --play 12
+    ../venv/bin/python learn/lesson2_torch.py --optimizer adam --batch 1024     # mini-batches and Adam
 
 Lesson 1 by hand            ->  Lesson 2 in PyTorch
   w = np.zeros(n); b = 0.0  ->  model = nn.Linear(n, 1)        (holds w and b, starts small)

@@ -108,11 +108,11 @@ lesson 0 (for example "this door is written in a ROUTE note here") and see wheth
 the *loss*; it works out the gradients itself (**autograd**) and an **optimiser** takes the step. Every bigger model
 from here on (and the Qwen ant) is made of exactly these pieces.
 
-**Run it** (PyTorch lives in the training Python, `~/ant-venv`):
+**Run it** (PyTorch lives in a training venv next to the repo, `../venv`; a CPU build of PyTorch is enough):
 
 ```bash
-~/ant-venv/bin/python learn/lesson2_torch.py --play 12
-~/ant-venv/bin/python learn/lesson2_torch.py --optimizer adam --batch 1024 --epochs 20
+../venv/bin/python learn/lesson2_torch.py --play 12
+../venv/bin/python learn/lesson2_torch.py --optimizer adam --batch 1024 --epochs 20
 ```
 
 **Side by side** (the top of the file shows each lesson 1 line next to its PyTorch version):

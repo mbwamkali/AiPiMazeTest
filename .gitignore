@@ -50,3 +50,6 @@ pi-time.sh
 config/*.toml
 !config/*.example.toml
 learn/data/
+
+# Spyder project settings (per machine)
+.spyproject/
